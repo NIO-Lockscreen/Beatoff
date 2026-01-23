@@ -99,20 +99,12 @@ const App: React.FC = () => {
   const prestigeSpeedReduc = UPGRADES[UpgradeType.PRESTIGE_FLUX].getEffect(gameState.upgrades[UpgradeType.PRESTIGE_FLUX] || 0);
 
   // 2. Calculate Standard Upgrade Effects
-  const standardChance = UPGRADES[UpgradeType.CHANCE].getEffect(gameState.upgrades[UpgradeType.CHANCE]);
-  const standardSpeed = UPGRADES[UpgradeType.SPEED].getEffect(gameState.upgrades[UpgradeType.SPEED]); // This returns the TARGET duration (e.g. 2000, 1500)
+  const standardChanceAdd = UPGRADES[UpgradeType.CHANCE].getEffect(gameState.upgrades[UpgradeType.CHANCE]);
+  const standardSpeed = UPGRADES[UpgradeType.SPEED].getEffect(gameState.upgrades[UpgradeType.SPEED]); 
   
   // 3. Combine
-  // Base chance is 0.20 + Prestige. Standard chance is additive bonus.
-  // Wait, standard chance logic in constants is: 0.20 + level*0.05. 
-  // Let's refactor the calculation:
-  // Chance = 0.20 + Prestige_Fate + (Standard_Chance_Level * 0.05)
   const baseChance = 0.20 + prestigeBaseChance;
-  const standardChanceAdd = UPGRADES[UpgradeType.CHANCE].getEffect(gameState.upgrades[UpgradeType.CHANCE]);
   const currentChance = baseChance + standardChanceAdd;
-
-  // Speed = Standard_Speed_Table_Value - Prestige_Flux
-  // But standard speed returns an absolute value. Let's subtract prestige from it.
   const currentSpeed = Math.max(50, standardSpeed - prestigeSpeedReduc);
 
   const currentCombo = UPGRADES[UpgradeType.COMBO].getEffect(gameState.upgrades[UpgradeType.COMBO]);
@@ -121,7 +113,6 @@ const App: React.FC = () => {
   const hasAutoFlip = (gameState.upgrades[UpgradeType.AUTO_FLIP] || 0) > 0;
   
   // Prestige Multiplier (Global Income)
-  // Level 0 = 1x. Level 1 = 1.1x. Level 2 = 1.2x.
   const prestigeMultiplier = 1 + (gameState.prestigeLevel * 0.1);
 
   // --- Actions ---
@@ -211,14 +202,33 @@ const App: React.FC = () => {
   const buyUpgrade = (type: UpgradeType, cost: number, isPrestige: boolean) => {
     if (isPrestige) {
         if (gameState.voidFragments >= cost) {
-            setGameState(prev => ({
-                ...prev,
-                voidFragments: prev.voidFragments - cost,
-                upgrades: {
-                    ...prev.upgrades,
-                    [type]: (prev.upgrades[type] || 0) + 1
+            setGameState(prev => {
+                let extraMoney = 0;
+                // Immediate payout for Karma Upgrade
+                if (type === UpgradeType.PRESTIGE_KARMA) {
+                    const currentLevel = prev.upgrades[type] || 0;
+                    const nextLevel = currentLevel + 1;
+                    const prevEffect = UPGRADES[type].getEffect(currentLevel);
+                    const nextEffect = UPGRADES[type].getEffect(nextLevel);
+                    // Payout the difference so the player feels the effect immediately
+                    extraMoney = nextEffect - prevEffect;
                 }
-            }));
+
+                if (extraMoney > 0) {
+                     // Subtle sound cue for the extra cash
+                     AudioService.playFlip(); 
+                }
+
+                return {
+                    ...prev,
+                    voidFragments: prev.voidFragments - cost,
+                    money: prev.money + extraMoney,
+                    upgrades: {
+                        ...prev.upgrades,
+                        [type]: (prev.upgrades[type] || 0) + 1
+                    }
+                };
+            });
         }
     } else {
         if (gameState.money >= cost) {
@@ -268,9 +278,6 @@ const App: React.FC = () => {
           prestigeLevel: gameState.prestigeLevel + 1,
           voidFragments: gameState.voidFragments + FRAGMENTS_PER_WIN,
           upgrades: prestigeUpgrades as Record<UpgradeType, number>,
-          // Keep total flips? No, reset stats for clean run, or keep for lifetime stats? 
-          // Let's keep lifetime stats but the UI displays current run stats typically.
-          // For now, simple reset of flips to track "flips this run".
           totalFlips: 0, 
       };
 

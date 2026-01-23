@@ -14,7 +14,8 @@ const ProbabilityModal: React.FC<Props> = ({ isOpen, onClose, currentChance }) =
   // Calculate data points for the graph
   // Showing Expected Flips vs Probability for a 10-streak
   const data = [];
-  for (let p = 0.20; p <= 0.60; p += 0.05) {
+  // Extended to 0.90 (90%) to match the upgrade cap
+  for (let p = 0.20; p <= 0.90; p += 0.05) {
     // Formula for expected flips to get N consecutive successes: (1/p^N - 1) / (1-p) roughly, or simpler (p^-N - 1)/(1-p)
     // Actually for N=10, the exact formula E = (p^-n - 1) / (1-p)
     const prob = parseFloat(p.toFixed(2));
