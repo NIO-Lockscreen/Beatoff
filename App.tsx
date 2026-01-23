@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { GameState, UpgradeType, WINNING_STREAK } from './types';
+import { GameState, UpgradeType, WINNING_STREAK, FRAGMENTS_PER_WIN } from './types';
 import { UPGRADES } from './constants';
 import Shop from './components/Shop';
 import ProbabilityModal from './components/ProbabilityModal';
 import ConfettiSystem from './components/ConfettiSystem';
 import { AudioService } from './services/audioService';
-import { HelpCircle, Trash2, Trophy, Volume2, VolumeX } from 'lucide-react';
+import { HelpCircle, Trash2, Trophy, Volume2, VolumeX, Sparkles, AlertCircle } from 'lucide-react';
 
 const CELEBRATION_MESSAGES = [
   "", 
@@ -33,8 +33,14 @@ const INITIAL_STATE: GameState = {
     [UpgradeType.AUTO_FLIP]: 0,
     [UpgradeType.PASSIVE_INCOME]: 0,
     [UpgradeType.EDGING]: 0,
+    // Prestige Upgrades
+    [UpgradeType.PRESTIGE_KARMA]: 0,
+    [UpgradeType.PRESTIGE_FATE]: 0,
+    [UpgradeType.PRESTIGE_FLUX]: 0,
   },
   history: [],
+  prestigeLevel: 0,
+  voidFragments: 0,
 };
 
 const SAVE_KEY = 'beatTheOdds_save';
@@ -47,21 +53,19 @@ const App: React.FC = () => {
       if (saved) {
         const parsed = JSON.parse(saved);
         // Ensure upgrades object has the new keys if loading old save
-        if (typeof parsed.upgrades[UpgradeType.AUTO_FLIP] === 'undefined') {
-            parsed.upgrades[UpgradeType.AUTO_FLIP] = 0;
+        const defaults = INITIAL_STATE.upgrades;
+        for (const key of Object.keys(defaults) as UpgradeType[]) {
+             if (typeof parsed.upgrades[key] === 'undefined') {
+                 parsed.upgrades[key] = 0;
+             }
         }
-        if (typeof parsed.upgrades[UpgradeType.PASSIVE_INCOME] === 'undefined') {
-            parsed.upgrades[UpgradeType.PASSIVE_INCOME] = 0;
-        }
-        if (typeof parsed.upgrades[UpgradeType.EDGING] === 'undefined') {
-            parsed.upgrades[UpgradeType.EDGING] = 0;
-        }
+        if (typeof parsed.prestigeLevel === 'undefined') parsed.prestigeLevel = 0;
+        if (typeof parsed.voidFragments === 'undefined') parsed.voidFragments = 0;
         return parsed;
       }
     } catch (e) {
       console.error("Failed to load save", e);
     }
-    // Return a deep copy of INITIAL_STATE to avoid reference issues
     return JSON.parse(JSON.stringify(INITIAL_STATE));
   });
 
@@ -70,7 +74,7 @@ const App: React.FC = () => {
   const [showModal, setShowModal] = useState(false);
   const [hasWon, setHasWon] = useState(false);
   const [celebration, setCelebration] = useState<{text: string, level: number, id: number} | null>(null);
-  const [muted, setMuted] = useState(true); // Default to muted
+  const [muted, setMuted] = useState(true);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
 
   const flipTimeoutRef = useRef<number | null>(null);
@@ -87,60 +91,76 @@ const App: React.FC = () => {
      AudioService.setMuted(muted);
   }, [muted]);
 
-  // --- Derived Values ---
-  const currentChance = UPGRADES[UpgradeType.CHANCE].getEffect(gameState.upgrades[UpgradeType.CHANCE]);
-  const currentSpeed = UPGRADES[UpgradeType.SPEED].getEffect(gameState.upgrades[UpgradeType.SPEED]);
+  // --- Derived Values (Stats Calculation) ---
+  
+  // 1. Calculate Base Values from Prestige
+  const prestigeKarmaMoney = UPGRADES[UpgradeType.PRESTIGE_KARMA].getEffect(gameState.upgrades[UpgradeType.PRESTIGE_KARMA] || 0);
+  const prestigeBaseChance = UPGRADES[UpgradeType.PRESTIGE_FATE].getEffect(gameState.upgrades[UpgradeType.PRESTIGE_FATE] || 0);
+  const prestigeSpeedReduc = UPGRADES[UpgradeType.PRESTIGE_FLUX].getEffect(gameState.upgrades[UpgradeType.PRESTIGE_FLUX] || 0);
+
+  // 2. Calculate Standard Upgrade Effects
+  const standardChance = UPGRADES[UpgradeType.CHANCE].getEffect(gameState.upgrades[UpgradeType.CHANCE]);
+  const standardSpeed = UPGRADES[UpgradeType.SPEED].getEffect(gameState.upgrades[UpgradeType.SPEED]); // This returns the TARGET duration (e.g. 2000, 1500)
+  
+  // 3. Combine
+  // Base chance is 0.20 + Prestige. Standard chance is additive bonus.
+  // Wait, standard chance logic in constants is: 0.20 + level*0.05. 
+  // Let's refactor the calculation:
+  // Chance = 0.20 + Prestige_Fate + (Standard_Chance_Level * 0.05)
+  const baseChance = 0.20 + prestigeBaseChance;
+  const standardChanceAdd = UPGRADES[UpgradeType.CHANCE].getEffect(gameState.upgrades[UpgradeType.CHANCE]);
+  const currentChance = baseChance + standardChanceAdd;
+
+  // Speed = Standard_Speed_Table_Value - Prestige_Flux
+  // But standard speed returns an absolute value. Let's subtract prestige from it.
+  const currentSpeed = Math.max(50, standardSpeed - prestigeSpeedReduc);
+
   const currentCombo = UPGRADES[UpgradeType.COMBO].getEffect(gameState.upgrades[UpgradeType.COMBO]);
   const currentBaseValue = UPGRADES[UpgradeType.VALUE].getEffect(gameState.upgrades[UpgradeType.VALUE]);
+  
   const hasAutoFlip = (gameState.upgrades[UpgradeType.AUTO_FLIP] || 0) > 0;
-  const hasEdging = (gameState.upgrades[UpgradeType.EDGING] || 0) > 0;
+  
+  // Prestige Multiplier (Global Income)
+  // Level 0 = 1x. Level 1 = 1.1x. Level 2 = 1.2x.
+  const prestigeMultiplier = 1 + (gameState.prestigeLevel * 0.1);
 
   // --- Actions ---
 
   const handleFlip = useCallback((forceHeads: boolean = false) => {
-    // If called from an event handler, forceHeads might be an object, ignore it in that case
     const isDebug = typeof forceHeads === 'boolean' && forceHeads === true;
 
     if (isFlipping || hasWon) return;
 
     setIsFlipping(true);
-    // Keep the previous side visual until the animation takes over
     AudioService.playFlip();
 
     const duration = currentSpeed;
 
     flipTimeoutRef.current = window.setTimeout(() => {
-      // Probability Check
       let isHeads = Math.random() < currentChance;
       
-      // Debug override
-      if (isDebug) {
-          isHeads = true;
-      }
+      if (isDebug) isHeads = true;
 
       const result = isHeads ? 'H' : 'T';
 
       setGameState(prev => {
         const newStreak = isHeads ? prev.streak + 1 : 0;
         
-        // Calculate earnings
         let earned = 0;
         if (isHeads) {
+            // Formula: Base * (1 + (Streak * ComboBonus))
             earned = Math.floor(currentBaseValue * (newStreak > 1 ? (1 + (newStreak * (currentCombo - 1))) : 1));
         } else {
-            // Passive Income on Tails
             const passiveLevel = prev.upgrades[UpgradeType.PASSIVE_INCOME] || 0;
             const passiveIncome = UPGRADES[UpgradeType.PASSIVE_INCOME].getEffect(passiveLevel);
-            if (passiveIncome > 0) {
-                earned = passiveIncome;
-            }
+            if (passiveIncome > 0) earned = passiveIncome;
         }
         
-        // Apply Edging Multiplier (10x from all sources)
         const edgingLevel = prev.upgrades[UpgradeType.EDGING] || 0;
-        if (edgingLevel > 0) {
-            earned *= 10;
-        }
+        if (edgingLevel > 0) earned *= 10;
+        
+        // Apply Prestige Multiplier
+        earned = Math.floor(earned * prestigeMultiplier);
         
         const newMaxStreak = Math.max(prev.maxStreak, newStreak);
         const won = newStreak >= WINNING_STREAK;
@@ -152,39 +172,21 @@ const App: React.FC = () => {
         if (isHeads) {
             AudioService.playHeads(newStreak);
             
-            // Trigger celebration for streaks 2+
             if (newStreak >= 2) {
                 if (celebrationTimeoutRef.current) window.clearTimeout(celebrationTimeoutRef.current);
                 
                 let message = CELEBRATION_MESSAGES[Math.min(newStreak, CELEBRATION_MESSAGES.length - 1)] || "GODLIKE";
                 
-                // Check ownership to prevent redundant unlock messages
                 const autoFlipOwned = (prev.upgrades[UpgradeType.AUTO_FLIP] || 0) > 0;
                 const passiveOwned = (prev.upgrades[UpgradeType.PASSIVE_INCOME] || 0) > 0;
                 const edgingOwned = (prev.upgrades[UpgradeType.EDGING] || 0) > 0;
 
-                // Specific popup for unlocks
-                // UNLOCK SWAP: Passive at 3, Auto Flip at 5, Edging at 9
-                if (newStreak === 3 && prev.maxStreak < 3 && !passiveOwned) {
-                    message = "PASSIVE INCOME UNLOCKED";
-                }
-                if (newStreak === 5 && prev.maxStreak < 5 && !autoFlipOwned) {
-                    message = "AUTO FLIP UNLOCKED";
-                }
-                if (newStreak === 9 && prev.maxStreak < 9 && !edgingOwned) {
-                    message = "EDGING UNLOCKED";
-                }
+                if (newStreak === 3 && prev.maxStreak < 3 && !passiveOwned) message = "PASSIVE INCOME UNLOCKED";
+                if (newStreak === 5 && prev.maxStreak < 5 && !autoFlipOwned) message = "AUTO FLIP UNLOCKED";
+                if (newStreak === 9 && prev.maxStreak < 9 && !edgingOwned) message = "EDGING UNLOCKED";
 
-                setCelebration({
-                    text: message,
-                    level: newStreak,
-                    id: Date.now()
-                });
-                
-                // Clear celebration after a short delay
-                celebrationTimeoutRef.current = window.setTimeout(() => {
-                    setCelebration(null);
-                }, 2500);
+                setCelebration({ text: message, level: newStreak, id: Date.now() });
+                celebrationTimeoutRef.current = window.setTimeout(() => setCelebration(null), 2500);
             }
         } else {
             AudioService.playTails();
@@ -204,24 +206,37 @@ const App: React.FC = () => {
       setIsFlipping(false);
     }, duration);
 
-  }, [isFlipping, hasWon, currentChance, currentSpeed, currentBaseValue, currentCombo]);
+  }, [isFlipping, hasWon, currentChance, currentSpeed, currentBaseValue, currentCombo, prestigeMultiplier]);
 
-  const buyUpgrade = (type: UpgradeType, cost: number) => {
-    if (gameState.money >= cost) {
-      setGameState(prev => ({
-        ...prev,
-        money: prev.money - cost,
-        upgrades: {
-          ...prev.upgrades,
-          [type]: (prev.upgrades[type] || 0) + 1
+  const buyUpgrade = (type: UpgradeType, cost: number, isPrestige: boolean) => {
+    if (isPrestige) {
+        if (gameState.voidFragments >= cost) {
+            setGameState(prev => ({
+                ...prev,
+                voidFragments: prev.voidFragments - cost,
+                upgrades: {
+                    ...prev.upgrades,
+                    [type]: (prev.upgrades[type] || 0) + 1
+                }
+            }));
         }
-      }));
+    } else {
+        if (gameState.money >= cost) {
+            setGameState(prev => ({
+                ...prev,
+                money: prev.money - cost,
+                upgrades: {
+                    ...prev.upgrades,
+                    [type]: (prev.upgrades[type] || 0) + 1
+                }
+            }));
+        }
     }
   };
 
-  const resetInternalState = () => {
+  // HARD RESET (Delete Save)
+  const hardReset = () => {
     localStorage.removeItem(SAVE_KEY);
-    // Deep copy INITIAL_STATE to ensure we have fresh references
     setGameState(JSON.parse(JSON.stringify(INITIAL_STATE)));
     setHasWon(false);
     setCoinSide(null);
@@ -229,20 +244,49 @@ const App: React.FC = () => {
     setDeleteConfirm(false);
   };
 
-  const handleDeleteClick = () => {
-    if (deleteConfirm) {
-        resetInternalState();
-    } else {
-        setDeleteConfirm(true);
-        // Auto-reset confirmation after 3 seconds
-        deleteTimeoutRef.current = window.setTimeout(() => {
-            setDeleteConfirm(false);
-        }, 3000);
-    }
+  // ASCEND (Prestige Reset)
+  const ascend = () => {
+      // 1. Calculate Start Money based on Karma
+      const karmaLevel = gameState.upgrades[UpgradeType.PRESTIGE_KARMA] || 0;
+      const startMoney = UPGRADES[UpgradeType.PRESTIGE_KARMA].getEffect(karmaLevel);
+
+      // 2. Preserve Prestige Upgrades
+      const prestigeUpgrades: Record<string, number> = {};
+      Object.keys(gameState.upgrades).forEach(key => {
+          const k = key as UpgradeType;
+          if (UPGRADES[k].isPrestige) {
+              prestigeUpgrades[k] = gameState.upgrades[k];
+          } else {
+              prestigeUpgrades[k] = 0;
+          }
+      });
+
+      // 3. New State
+      const nextState: GameState = {
+          ...INITIAL_STATE,
+          money: startMoney,
+          prestigeLevel: gameState.prestigeLevel + 1,
+          voidFragments: gameState.voidFragments + FRAGMENTS_PER_WIN,
+          upgrades: prestigeUpgrades as Record<UpgradeType, number>,
+          // Keep total flips? No, reset stats for clean run, or keep for lifetime stats? 
+          // Let's keep lifetime stats but the UI displays current run stats typically.
+          // For now, simple reset of flips to track "flips this run".
+          totalFlips: 0, 
+      };
+
+      setGameState(nextState);
+      setHasWon(false);
+      setCoinSide(null);
+      setCelebration(null);
   };
 
-  const restartGame = () => {
-    resetInternalState();
+  const handleDeleteClick = () => {
+    if (deleteConfirm) {
+        hardReset();
+    } else {
+        setDeleteConfirm(true);
+        deleteTimeoutRef.current = window.setTimeout(() => setDeleteConfirm(false), 3000);
+    }
   };
 
   const toggleMute = () => {
@@ -254,25 +298,16 @@ const App: React.FC = () => {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
         if (e.code === 'Space') {
-            e.preventDefault(); // Prevent scrolling
+            e.preventDefault(); 
             handleFlip(false);
         }
-        if (e.code === 'KeyQ') {
-            handleFlip(true); // Secret debug flip
-        }
+        if (e.code === 'KeyQ') handleFlip(true);
         if (e.code === 'KeyZ') {
-            // Debug money cheat
-            setGameState(prev => ({
-                ...prev,
-                money: prev.money + 10000
-            }));
+            setGameState(prev => ({ ...prev, money: prev.money + 10000 }));
         }
     };
-
     window.addEventListener('keydown', handleKeyDown);
-    return () => {
-        window.removeEventListener('keydown', handleKeyDown);
-    };
+    return () => window.removeEventListener('keydown', handleKeyDown);
   }, [handleFlip]);
 
 
@@ -280,14 +315,9 @@ const App: React.FC = () => {
   useEffect(() => {
     let timer: number;
     if (hasAutoFlip && !isFlipping && !hasWon) {
-        // Small delay to prevent instant loops and allow UI updates
-        timer = window.setTimeout(() => {
-            handleFlip(false);
-        }, 300);
+        timer = window.setTimeout(() => handleFlip(false), 300);
     }
-    return () => {
-        if (timer) window.clearTimeout(timer);
-    };
+    return () => { if (timer) window.clearTimeout(timer); };
   }, [hasAutoFlip, isFlipping, hasWon, handleFlip]);
 
 
@@ -302,61 +332,23 @@ const App: React.FC = () => {
   return (
     <div className={`min-h-screen md:h-screen md:overflow-hidden overflow-y-auto bg-noir-950 text-noir-200 font-sans selection:bg-amber-900 selection:text-white flex flex-col md:flex-row relative transition-colors duration-200 ${celebration && celebration.level >= 8 ? 'bg-noir-900' : ''}`}>
       
-      {/* Visual Overlays - Low Z-index */}
+      {/* Visual Overlays */}
       <div className="bg-noise pointer-events-none fixed inset-0 z-0" />
       <div className="bg-vignette pointer-events-none fixed inset-0 z-0" />
-      
-      {/* Confetti System - Mid Z-index */}
       <ConfettiSystem streak={gameState.streak} />
       
-      {/* Celebration Overlay - High Z-index */}
+      {/* Celebration Overlay */}
       {celebration && (
         <div className={`pointer-events-none fixed inset-0 z-[90] flex items-center justify-center flex-col overflow-hidden`}>
-            {/* Flash Effect for high streaks */}
-            {celebration.level >= 5 && (
-                <div className="absolute inset-0 bg-white/20 animate-flash mix-blend-overlay"></div>
-            )}
-            
-            {/* Shake Container */}
+            {celebration.level >= 5 && <div className="absolute inset-0 bg-white/20 animate-flash mix-blend-overlay"></div>}
             <div className={`${celebration.level >= 8 ? 'animate-shake' : ''} flex flex-col items-center justify-center`}>
-                <h2 
-                    key={celebration.id} 
-                    className={`
-                        font-mono font-bold drop-shadow-[0_0_15px_rgba(251,191,36,0.6)] text-center whitespace-nowrap
-                        ${celebration.level >= 9 
-                            ? 'text-7xl md:text-9xl text-amber-500 animate-scale-slam' 
-                            : celebration.level >= 5 
-                                ? 'text-6xl md:text-8xl text-amber-400 animate-pop-up' 
-                                : 'text-4xl md:text-6xl text-amber-200/80 animate-pop-in-up'}
-                    `}
-                >
+                <h2 key={celebration.id} className={`font-mono font-bold drop-shadow-[0_0_15px_rgba(251,191,36,0.6)] text-center whitespace-nowrap ${celebration.level >= 9 ? 'text-7xl md:text-9xl text-amber-500 animate-scale-slam' : celebration.level >= 5 ? 'text-6xl md:text-8xl text-amber-400 animate-pop-up' : 'text-4xl md:text-6xl text-amber-200/80 animate-pop-in-up'}`}>
                     {celebration.text}
                 </h2>
-                <div className={`
-                    mt-2 md:mt-4 font-mono font-bold tracking-[0.5em] md:tracking-[1em] text-white/90 uppercase
-                    ${celebration.level >= 7 ? 'text-2xl animate-pulse' : 'text-sm'}
-                `}>
+                <div className={`mt-2 md:mt-4 font-mono font-bold tracking-[0.5em] md:tracking-[1em] text-white/90 uppercase ${celebration.level >= 7 ? 'text-2xl animate-pulse' : 'text-sm'}`}>
                     {celebration.level}x STREAK
                 </div>
             </div>
-            
-            {/* Particles */}
-            {celebration.level >= 6 && (
-                 <div className="absolute inset-0 overflow-hidden pointer-events-none">
-                     {[...Array(20)].map((_, i) => (
-                         <div 
-                            key={i}
-                            className="absolute w-1 h-1 bg-amber-400 rounded-full animate-particle"
-                            style={{
-                                left: `${50 + (Math.random() * 40 - 20)}%`,
-                                top: `${50 + (Math.random() * 40 - 20)}%`,
-                                animationDelay: `${Math.random() * 0.2}s`,
-                                transform: `rotate(${Math.random() * 360}deg)`
-                            }}
-                         />
-                     ))}
-                 </div>
-            )}
         </div>
       )}
 
@@ -366,7 +358,7 @@ const App: React.FC = () => {
       {/* Main Game Area */}
       <div className="flex-1 flex flex-col relative min-h-[600px] md:min-h-0 z-10">
         
-        {/* Header / Stats */}
+        {/* Header */}
         <header className="p-6 border-b border-noir-800/50 flex justify-between items-end bg-noir-950/30 backdrop-blur-sm relative z-50">
             <div>
                 <h1 className="text-3xl font-mono font-bold tracking-tighter text-white drop-shadow-md">
@@ -382,10 +374,12 @@ const App: React.FC = () => {
                             <span className="text-noir-600">/ {WINNING_STREAK}</span>
                         </div>
                     </div>
-                    <div className="flex flex-col">
-                        <span className="text-[10px] uppercase tracking-widest text-noir-600 mb-0.5">Best</span>
-                        <span className="text-2xl font-bold leading-none text-noir-400">{gameState.maxStreak}</span>
-                    </div>
+                    {gameState.prestigeLevel > 0 && (
+                        <div className="flex flex-col">
+                            <span className="text-[10px] uppercase tracking-widest text-purple-400 mb-0.5">Prestige</span>
+                            <span className="text-2xl font-bold leading-none text-purple-300">{gameState.prestigeLevel}</span>
+                        </div>
+                    )}
                 </div>
             </div>
             
@@ -397,49 +391,55 @@ const App: React.FC = () => {
             </div>
         </header>
 
-        {/* Center Stage: The Coin */}
+        {/* Center Stage */}
         <main className="flex-1 flex flex-col items-center justify-center relative z-10 py-10 md:py-0">
             
             {hasWon ? (
-                <div className="text-center animate-fade-in space-y-6 bg-noir-900/80 p-12 border border-amber-500/20 rounded-xl backdrop-blur-md shadow-2xl relative overflow-hidden group">
-                    <div className="absolute inset-0 bg-gradient-to-t from-amber-900/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-1000"></div>
-                    <Trophy className="w-20 h-20 text-amber-500 mx-auto mb-4 drop-shadow-[0_0_15px_rgba(245,158,11,0.5)]" />
+                <div className="text-center animate-fade-in space-y-6 bg-noir-900/90 p-12 border-2 border-amber-500/30 rounded-xl backdrop-blur-md shadow-[0_0_50px_rgba(0,0,0,0.8)] relative overflow-hidden group max-w-lg mx-4">
+                    <div className="absolute inset-0 bg-gradient-to-t from-purple-900/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-1000"></div>
+                    
+                    <Trophy className="w-24 h-24 text-amber-500 mx-auto mb-4 drop-shadow-[0_0_20px_rgba(245,158,11,0.6)] animate-bounce" />
+                    
                     <h2 className="text-5xl font-mono font-bold text-white tracking-tight">IMPOSSIBLE.</h2>
-                    <p className="text-noir-300 max-w-md mx-auto font-mono leading-relaxed">
-                        You defied the probability. <br/>
-                        <span className="text-amber-400 font-bold">10 Heads</span> in a row. 
-                        <br/><br/>
-                        Total Attempts: {gameState.totalFlips.toLocaleString()}
-                    </p>
-                    <button 
-                        onClick={restartGame}
-                        className="px-8 py-3 bg-white text-black font-mono font-bold tracking-widest hover:bg-amber-400 transition-all duration-300 shadow-lg hover:shadow-amber-500/20 transform hover:-translate-y-1 relative z-50 cursor-pointer"
-                    >
-                        PLAY AGAIN
-                    </button>
+                    
+                    <div className="text-noir-300 font-mono leading-relaxed space-y-2">
+                        <p>You defied the probability.</p>
+                        <p className="text-amber-400 font-bold text-xl">10 Heads in a row.</p>
+                        <div className="pt-4 border-t border-noir-800 mt-4">
+                            <p className="text-sm">Total Attempts: {gameState.totalFlips.toLocaleString()}</p>
+                            <p className="text-purple-400 font-bold text-lg mt-2 flex items-center justify-center gap-2">
+                                <Sparkles size={16} /> REWARD: {FRAGMENTS_PER_WIN} VOID FRAGMENTS
+                            </p>
+                        </div>
+                    </div>
+                    
+                    <div className="flex flex-col gap-3 pt-4 relative z-50">
+                        <button 
+                            onClick={ascend}
+                            className="w-full px-8 py-4 bg-purple-600 text-white font-mono font-bold tracking-widest hover:bg-purple-500 transition-all duration-300 shadow-lg hover:shadow-purple-500/40 transform hover:-translate-y-1 flex items-center justify-center gap-3"
+                        >
+                            <Sparkles size={20} />
+                            ASCEND (NEW GAME+)
+                        </button>
+                        <p className="text-[10px] text-noir-500 font-mono uppercase tracking-widest">
+                            Resets progress • Keeps Prestige Upgrades • Increases Difficulty? No, just Profit.
+                        </p>
+                    </div>
                 </div>
             ) : (
                 <div className="flex flex-col items-center gap-16 w-full max-w-md z-10">
                     
-                    {/* Coin Container - 3D Perspective */}
+                    {/* Coin Container */}
                     <div className="relative w-64 h-64 perspective-1000 flex items-center justify-center">
-                        
-                        {/* Shadow - Animates scale */}
                         <div 
                            className="absolute bottom-10 w-32 h-4 bg-black/40 blur-xl rounded-[100%]"
-                           style={{
-                             animation: isFlipping ? `shadowScale ${currentSpeed}ms cubic-bezier(0.5, 0, 0.5, 1) forwards` : 'none',
-                           }}
+                           style={{ animation: isFlipping ? `shadowScale ${currentSpeed}ms cubic-bezier(0.5, 0, 0.5, 1) forwards` : 'none' }}
                         ></div>
 
-                        {/* Bouncing Wrapper (Y-axis translation) */}
                         <div 
                           className="w-48 h-48 relative preserve-3d"
-                          style={{
-                             animation: isFlipping ? `tossHeight ${currentSpeed}ms cubic-bezier(0.5, 0, 0.5, 1) forwards` : 'none',
-                          }}
+                          style={{ animation: isFlipping ? `tossHeight ${currentSpeed}ms cubic-bezier(0.5, 0, 0.5, 1) forwards` : 'none' }}
                         >
-                            {/* Spinning Inner (X-axis rotation) */}
                             <div 
                                 className="w-full h-full relative preserve-3d"
                                 style={{ 
@@ -447,37 +447,22 @@ const App: React.FC = () => {
                                     transform: !isFlipping && coinSide ? (coinSide === 'T' ? 'rotateX(180deg)' : 'rotateX(0deg)') : undefined
                                 }}
                             >
-                                {/* Heads Side (Front) */}
-                                <div 
-                                    className="absolute inset-0 backface-hidden rounded-full bg-gradient-to-br from-amber-200 via-amber-500 to-amber-700 shadow-inner border-4 border-amber-600 flex items-center justify-center overflow-hidden"
-                                    style={{ transform: 'rotateX(0deg)' }}
-                                >
-                                    {/* Texture details */}
+                                {/* Heads */}
+                                <div className="absolute inset-0 backface-hidden rounded-full bg-gradient-to-br from-amber-200 via-amber-500 to-amber-700 shadow-inner border-4 border-amber-600 flex items-center justify-center overflow-hidden" style={{ transform: 'rotateX(0deg)' }}>
                                     <div className="absolute inset-0 opacity-20 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')]"></div>
                                     <div className="absolute inset-2 border-2 border-dashed border-amber-300/30 rounded-full"></div>
-                                    {/* Updated to Dollar Sign */}
                                     <span className="text-8xl font-serif font-bold text-amber-950 mix-blend-overlay drop-shadow-md relative z-10">$</span>
-                                    {/* Shine */}
                                     <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/30 to-transparent rounded-full pointer-events-none"></div>
                                 </div>
-                                
-                                {/* Tails Side (Back) - Pre-rotated to face back */}
-                                <div 
-                                    className="absolute inset-0 backface-hidden rounded-full bg-gradient-to-br from-slate-200 via-slate-400 to-slate-600 shadow-inner border-4 border-slate-500 flex items-center justify-center overflow-hidden"
-                                    style={{ transform: 'rotateX(180deg)' }}
-                                >
+                                {/* Tails */}
+                                <div className="absolute inset-0 backface-hidden rounded-full bg-gradient-to-br from-slate-200 via-slate-400 to-slate-600 shadow-inner border-4 border-slate-500 flex items-center justify-center overflow-hidden" style={{ transform: 'rotateX(180deg)' }}>
                                     <div className="absolute inset-0 opacity-20 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')]"></div>
                                     <div className="absolute inset-2 border-2 border-dashed border-slate-300/30 rounded-full"></div>
-                                    
-                                    {/* Symmetrical Sad Smiley */}
                                     <div className="relative w-full h-full z-10 opacity-70">
-                                        {/* Eyes */}
                                         <div className="absolute top-[35%] left-[28%] w-[14%] h-[14%] bg-slate-900 rounded-full mix-blend-overlay shadow-sm"></div>
                                         <div className="absolute top-[35%] right-[28%] w-[14%] h-[14%] bg-slate-900 rounded-full mix-blend-overlay shadow-sm"></div>
-                                        {/* Mouth: Semicircle with top border creates a perfect frown */}
                                         <div className="absolute top-[52%] left-1/2 -translate-x-1/2 w-[55%] h-[35%] border-t-[10px] border-slate-900 rounded-[50%] mix-blend-overlay"></div>
                                     </div>
-                                    
                                     <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/20 to-transparent rounded-full pointer-events-none"></div>
                                 </div>
                             </div>
@@ -503,60 +488,34 @@ const App: React.FC = () => {
                         <div className="flex flex-col items-center gap-1">
                              <div className="text-[10px] uppercase tracking-widest text-noir-500">Probability</div>
                              <div className="font-mono text-amber-500 text-lg font-bold">{(currentChance * 100).toFixed(0)}%</div>
+                             {prestigeBaseChance > 0 && (
+                                <div className="text-[10px] text-purple-400 font-mono">(+{(prestigeBaseChance * 100).toFixed(0)}% Base)</div>
+                             )}
                         </div>
                     </div>
                 </div>
             )}
         </main>
 
-        {/* Footer / Log - High Z-index to float above noise */}
+        {/* Footer */}
         <footer className="h-20 bg-noir-950/80 backdrop-blur-md border-t border-noir-800/50 flex items-center justify-between px-6 relative z-50">
             <div className="flex gap-3 overflow-hidden mask-linear-fade items-center">
                 <span className="text-[10px] uppercase tracking-widest text-noir-700 mr-2">History</span>
                 {gameState.history.map((res, i) => (
-                    <div 
-                        key={i} 
-                        className={`
-                            w-8 h-8 flex items-center justify-center font-mono font-bold rounded-sm text-xs shadow-lg transition-transform hover:scale-110 cursor-default
-                            ${res === 'H' 
-                                ? 'bg-gradient-to-b from-amber-500 to-amber-700 text-white border border-amber-400' 
-                                : 'bg-gradient-to-b from-noir-700 to-noir-800 text-noir-400 border border-noir-600'}
-                        `}
-                    >
-                        {/* Display $ for Heads, :( for Tails */}
-                        {res === 'H' ? '$' : (
-                             <span className="rotate-90 inline-block text-[8px] tracking-tighter font-sans scale-y-150 transform-gpu">:(</span>
-                        )}
+                    <div key={i} className={`w-8 h-8 flex items-center justify-center font-mono font-bold rounded-sm text-xs shadow-lg transition-transform hover:scale-110 cursor-default ${res === 'H' ? 'bg-gradient-to-b from-amber-500 to-amber-700 text-white border border-amber-400' : 'bg-gradient-to-b from-noir-700 to-noir-800 text-noir-400 border border-noir-600'}`}>
+                        {res === 'H' ? '$' : <span className="rotate-90 inline-block text-[8px] tracking-tighter font-sans scale-y-150 transform-gpu">:(</span>}
                     </div>
                 ))}
             </div>
             
             <div className="flex gap-4">
-                 <button 
-                    onClick={toggleMute}
-                    className="p-2 text-noir-500 hover:text-white transition-colors hover:bg-noir-900 rounded-full cursor-pointer"
-                    title={muted ? "Unmute" : "Mute"}
-                >
+                 <button onClick={toggleMute} className="p-2 text-noir-500 hover:text-white transition-colors hover:bg-noir-900 rounded-full cursor-pointer" title={muted ? "Unmute" : "Mute"}>
                     {muted ? <VolumeX size={20} /> : <Volume2 size={20} />}
                 </button>
-                 <button 
-                    onClick={() => setShowModal(true)}
-                    className="p-2 text-noir-500 hover:text-white transition-colors hover:bg-noir-900 rounded-full cursor-pointer"
-                    title="Math Analysis"
-                >
+                 <button onClick={() => setShowModal(true)} className="p-2 text-noir-500 hover:text-white transition-colors hover:bg-noir-900 rounded-full cursor-pointer" title="Math Analysis">
                     <HelpCircle size={20} />
                 </button>
-                 <button 
-                    onClick={handleDeleteClick}
-                    className={`
-                        p-2 transition-colors rounded-full font-mono text-xs flex items-center justify-center cursor-pointer w-9 h-9
-                        ${deleteConfirm 
-                            ? 'bg-red-900 text-white hover:bg-red-800 ring-1 ring-red-500' 
-                            : 'text-noir-500 hover:text-red-500 hover:bg-noir-900'
-                        }
-                    `}
-                    title="Delete Save & Reset"
-                >
+                 <button onClick={handleDeleteClick} className={`p-2 transition-colors rounded-full font-mono text-xs flex items-center justify-center cursor-pointer w-9 h-9 ${deleteConfirm ? 'bg-red-900 text-white hover:bg-red-800 ring-1 ring-red-500' : 'text-noir-500 hover:text-red-500 hover:bg-noir-900'}`} title="Delete Save & Reset">
                     {deleteConfirm ? '!' : <Trash2 size={20} />}
                 </button>
             </div>
@@ -564,71 +523,34 @@ const App: React.FC = () => {
 
       </div>
 
-      {/* Shop Sidebar */}
       <Shop 
         money={gameState.money} 
+        voidFragments={gameState.voidFragments}
+        prestigeLevel={gameState.prestigeLevel}
         upgrades={gameState.upgrades} 
         onBuy={buyUpgrade}
         maxStreak={gameState.maxStreak}
       />
 
-      {/* Probability Modal - Max Z-index */}
       <div className="relative z-[100]">
-        <ProbabilityModal 
-            isOpen={showModal} 
-            onClose={() => setShowModal(false)} 
-            currentChance={currentChance} 
-        />
+        <ProbabilityModal isOpen={showModal} onClose={() => setShowModal(false)} currentChance={currentChance} />
       </div>
 
       <style>{`
         .rotate-x-180 { transform: rotateX(180deg); }
-        .mask-linear-fade {
-            mask-image: linear-gradient(to right, transparent, black 10%, black 90%, transparent);
-            -webkit-mask-image: linear-gradient(to right, transparent, black 10%, black 90%, transparent);
-        }
-        
-        /* New Celebration Animations */
-        @keyframes popInUp {
-            0% { opacity: 0; transform: translateY(20px) scale(0.9); }
-            100% { opacity: 1; transform: translateY(0) scale(1); }
-        }
+        .mask-linear-fade { mask-image: linear-gradient(to right, transparent, black 10%, black 90%, transparent); -webkit-mask-image: linear-gradient(to right, transparent, black 10%, black 90%, transparent); }
+        @keyframes popInUp { 0% { opacity: 0; transform: translateY(20px) scale(0.9); } 100% { opacity: 1; transform: translateY(0) scale(1); } }
         .animate-pop-in-up { animation: popInUp 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
-        
-        @keyframes popUp {
-            0% { opacity: 0; transform: scale(0.5); }
-            50% { opacity: 1; transform: scale(1.1); }
-            100% { opacity: 1; transform: scale(1); }
-        }
+        @keyframes popUp { 0% { opacity: 0; transform: scale(0.5); } 50% { opacity: 1; transform: scale(1.1); } 100% { opacity: 1; transform: scale(1); } }
         .animate-pop-up { animation: popUp 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
-
-        @keyframes scaleSlam {
-            0% { opacity: 0; transform: scale(5); }
-            60% { opacity: 1; transform: scale(0.9); }
-            100% { opacity: 1; transform: scale(1); }
-        }
+        @keyframes scaleSlam { 0% { opacity: 0; transform: scale(5); } 60% { opacity: 1; transform: scale(0.9); } 100% { opacity: 1; transform: scale(1); } }
         .animate-scale-slam { animation: scaleSlam 0.5s cubic-bezier(0.6, -0.28, 0.735, 0.045) forwards; }
-
-        @keyframes flash {
-            0%, 100% { opacity: 0; }
-            10%, 90% { opacity: 1; }
-        }
+        @keyframes flash { 0%, 100% { opacity: 0; } 10%, 90% { opacity: 1; } }
         .animate-flash { animation: flash 0.3s ease-out forwards; }
-        
-        @keyframes shake {
-            0%, 100% { transform: translateX(0); }
-            10%, 30%, 50%, 70%, 90% { transform: translateX(-5px) rotate(-1deg); }
-            20%, 40%, 60%, 80% { transform: translateX(5px) rotate(1deg); }
-        }
+        @keyframes shake { 0%, 100% { transform: translateX(0); } 10%, 30%, 50%, 70%, 90% { transform: translateX(-5px) rotate(-1deg); } 20%, 40%, 60%, 80% { transform: translateX(5px) rotate(1deg); } }
         .animate-shake { animation: shake 0.5s ease-in-out; }
-        
-        @keyframes particle {
-            0% { transform: translate(0, 0) scale(1); opacity: 1; }
-            100% { transform: translate(var(--tw-translate-x, 100px), var(--tw-translate-y, 100px)) scale(0); opacity: 0; }
-        }
-        .animate-particle {
-             animation: particle 1s ease-out forwards;
-        }
+        @keyframes particle { 0% { transform: translate(0, 0) scale(1); opacity: 1; } 100% { transform: translate(var(--tw-translate-x, 100px), var(--tw-translate-y, 100px)) scale(0); opacity: 0; } }
+        .animate-particle { animation: particle 1s ease-out forwards; }
       `}</style>
     </div>
   );
