@@ -1,7 +1,7 @@
 import React from 'react';
 import { UpgradeType } from '../types';
 import { UPGRADES } from '../constants';
-import { Zap, TrendingUp, Clock, Coins, PlayCircle } from 'lucide-react';
+import { Zap, TrendingUp, Clock, Coins, PlayCircle, ShieldCheck, Flame } from 'lucide-react';
 
 interface ShopProps {
   money: number;
@@ -16,6 +16,8 @@ const ICONS = {
   [UpgradeType.COMBO]: Zap,
   [UpgradeType.VALUE]: Coins,
   [UpgradeType.AUTO_FLIP]: PlayCircle,
+  [UpgradeType.PASSIVE_INCOME]: ShieldCheck,
+  [UpgradeType.EDGING]: Flame,
 };
 
 const Shop: React.FC<ShopProps> = ({ money, upgrades, onBuy, maxStreak }) => {
@@ -35,10 +37,22 @@ const Shop: React.FC<ShopProps> = ({ money, upgrades, onBuy, maxStreak }) => {
       */}
       <div className="flex-1 p-4 space-y-4 md:overflow-y-auto overflow-visible">
         {Object.values(UPGRADES).map((upgrade) => {
-          // Hide Auto Flip if streak < 3 and not yet purchased
-          if (upgrade.id === UpgradeType.AUTO_FLIP) {
+          // Hide Passive Income if streak < 3 and not yet purchased
+          if (upgrade.id === UpgradeType.PASSIVE_INCOME) {
               const owned = (upgrades[upgrade.id] || 0) > 0;
               if (!owned && maxStreak < 3) return null;
+          }
+
+          // Hide Auto Flip if streak < 5 and not yet purchased
+          if (upgrade.id === UpgradeType.AUTO_FLIP) {
+              const owned = (upgrades[upgrade.id] || 0) > 0;
+              if (!owned && maxStreak < 5) return null;
+          }
+
+          // Hide Edging if streak < 9 and not yet purchased
+          if (upgrade.id === UpgradeType.EDGING) {
+              const owned = (upgrades[upgrade.id] || 0) > 0;
+              if (!owned && maxStreak < 9) return null;
           }
 
           const currentLevel = upgrades[upgrade.id] || 0;

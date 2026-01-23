@@ -1,6 +1,6 @@
 // Simple synth to avoid external assets
 let audioCtx: AudioContext | null = null;
-let isMuted = false;
+let isMuted = true; // Default to true
 
 const initAudio = () => {
   if (!audioCtx) {

@@ -4,6 +4,8 @@ export enum UpgradeType {
   COMBO = 'COMBO',
   VALUE = 'VALUE',
   AUTO_FLIP = 'AUTO_FLIP',
+  PASSIVE_INCOME = 'PASSIVE_INCOME',
+  EDGING = 'EDGING',
 }
 
 export interface UpgradeConfig {

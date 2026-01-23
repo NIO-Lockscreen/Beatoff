@@ -3,6 +3,7 @@ import { GameState, UpgradeType, WINNING_STREAK } from './types';
 import { UPGRADES } from './constants';
 import Shop from './components/Shop';
 import ProbabilityModal from './components/ProbabilityModal';
+import ConfettiSystem from './components/ConfettiSystem';
 import { AudioService } from './services/audioService';
 import { HelpCircle, Trash2, Trophy, Volume2, VolumeX } from 'lucide-react';
 
@@ -30,6 +31,8 @@ const INITIAL_STATE: GameState = {
     [UpgradeType.COMBO]: 0,
     [UpgradeType.VALUE]: 0,
     [UpgradeType.AUTO_FLIP]: 0,
+    [UpgradeType.PASSIVE_INCOME]: 0,
+    [UpgradeType.EDGING]: 0,
   },
   history: [],
 };
@@ -43,9 +46,15 @@ const App: React.FC = () => {
       const saved = localStorage.getItem(SAVE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
-        // Ensure upgrades object has the new key if loading old save
+        // Ensure upgrades object has the new keys if loading old save
         if (typeof parsed.upgrades[UpgradeType.AUTO_FLIP] === 'undefined') {
             parsed.upgrades[UpgradeType.AUTO_FLIP] = 0;
+        }
+        if (typeof parsed.upgrades[UpgradeType.PASSIVE_INCOME] === 'undefined') {
+            parsed.upgrades[UpgradeType.PASSIVE_INCOME] = 0;
+        }
+        if (typeof parsed.upgrades[UpgradeType.EDGING] === 'undefined') {
+            parsed.upgrades[UpgradeType.EDGING] = 0;
         }
         return parsed;
       }
@@ -61,7 +70,7 @@ const App: React.FC = () => {
   const [showModal, setShowModal] = useState(false);
   const [hasWon, setHasWon] = useState(false);
   const [celebration, setCelebration] = useState<{text: string, level: number, id: number} | null>(null);
-  const [muted, setMuted] = useState(false);
+  const [muted, setMuted] = useState(true); // Default to muted
   const [deleteConfirm, setDeleteConfirm] = useState(false);
 
   const flipTimeoutRef = useRef<number | null>(null);
@@ -73,12 +82,18 @@ const App: React.FC = () => {
     localStorage.setItem(SAVE_KEY, JSON.stringify(gameState));
   }, [gameState]);
 
+  // --- Mute Sync ---
+  useEffect(() => {
+     AudioService.setMuted(muted);
+  }, [muted]);
+
   // --- Derived Values ---
   const currentChance = UPGRADES[UpgradeType.CHANCE].getEffect(gameState.upgrades[UpgradeType.CHANCE]);
   const currentSpeed = UPGRADES[UpgradeType.SPEED].getEffect(gameState.upgrades[UpgradeType.SPEED]);
   const currentCombo = UPGRADES[UpgradeType.COMBO].getEffect(gameState.upgrades[UpgradeType.COMBO]);
   const currentBaseValue = UPGRADES[UpgradeType.VALUE].getEffect(gameState.upgrades[UpgradeType.VALUE]);
   const hasAutoFlip = (gameState.upgrades[UpgradeType.AUTO_FLIP] || 0) > 0;
+  const hasEdging = (gameState.upgrades[UpgradeType.EDGING] || 0) > 0;
 
   // --- Actions ---
 
@@ -107,9 +122,26 @@ const App: React.FC = () => {
 
       setGameState(prev => {
         const newStreak = isHeads ? prev.streak + 1 : 0;
-        const earned = isHeads 
-          ? Math.floor(currentBaseValue * (newStreak > 1 ? (1 + (newStreak * (currentCombo - 1))) : 1))
-          : 0;
+        
+        // Calculate earnings
+        let earned = 0;
+        if (isHeads) {
+            earned = Math.floor(currentBaseValue * (newStreak > 1 ? (1 + (newStreak * (currentCombo - 1))) : 1));
+        } else {
+            // Passive Income on Tails
+            const passiveLevel = prev.upgrades[UpgradeType.PASSIVE_INCOME] || 0;
+            const passiveIncome = UPGRADES[UpgradeType.PASSIVE_INCOME].getEffect(passiveLevel);
+            if (passiveIncome > 0) {
+                earned = passiveIncome;
+            }
+        }
+        
+        // Apply Edging Multiplier (10x from all sources)
+        const edgingLevel = prev.upgrades[UpgradeType.EDGING] || 0;
+        if (edgingLevel > 0) {
+            earned *= 10;
+        }
+        
         const newMaxStreak = Math.max(prev.maxStreak, newStreak);
         const won = newStreak >= WINNING_STREAK;
         
@@ -126,9 +158,21 @@ const App: React.FC = () => {
                 
                 let message = CELEBRATION_MESSAGES[Math.min(newStreak, CELEBRATION_MESSAGES.length - 1)] || "GODLIKE";
                 
-                // Specific popup for streak 3
-                if (newStreak === 3) {
-                    message = "NEW STORE ITEM";
+                // Check ownership to prevent redundant unlock messages
+                const autoFlipOwned = (prev.upgrades[UpgradeType.AUTO_FLIP] || 0) > 0;
+                const passiveOwned = (prev.upgrades[UpgradeType.PASSIVE_INCOME] || 0) > 0;
+                const edgingOwned = (prev.upgrades[UpgradeType.EDGING] || 0) > 0;
+
+                // Specific popup for unlocks
+                // UNLOCK SWAP: Passive at 3, Auto Flip at 5, Edging at 9
+                if (newStreak === 3 && prev.maxStreak < 3 && !passiveOwned) {
+                    message = "PASSIVE INCOME UNLOCKED";
+                }
+                if (newStreak === 5 && prev.maxStreak < 5 && !autoFlipOwned) {
+                    message = "AUTO FLIP UNLOCKED";
+                }
+                if (newStreak === 9 && prev.maxStreak < 9 && !edgingOwned) {
+                    message = "EDGING UNLOCKED";
                 }
 
                 setCelebration({
@@ -169,7 +213,7 @@ const App: React.FC = () => {
         money: prev.money - cost,
         upgrades: {
           ...prev.upgrades,
-          [type]: prev.upgrades[type] + 1
+          [type]: (prev.upgrades[type] || 0) + 1
         }
       }));
     }
@@ -216,6 +260,13 @@ const App: React.FC = () => {
         if (e.code === 'KeyQ') {
             handleFlip(true); // Secret debug flip
         }
+        if (e.code === 'KeyZ') {
+            // Debug money cheat
+            setGameState(prev => ({
+                ...prev,
+                money: prev.money + 10000
+            }));
+        }
     };
 
     window.addEventListener('keydown', handleKeyDown);
@@ -254,6 +305,9 @@ const App: React.FC = () => {
       {/* Visual Overlays - Low Z-index */}
       <div className="bg-noise pointer-events-none fixed inset-0 z-0" />
       <div className="bg-vignette pointer-events-none fixed inset-0 z-0" />
+      
+      {/* Confetti System - Mid Z-index */}
+      <ConfettiSystem streak={gameState.streak} />
       
       {/* Celebration Overlay - High Z-index */}
       {celebration && (

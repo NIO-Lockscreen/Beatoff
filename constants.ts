@@ -59,6 +59,17 @@ export const UPGRADES: Record<UpgradeType, UpgradeConfig> = {
     },
     formatEffect: (val) => `$${val}`,
   },
+  [UpgradeType.PASSIVE_INCOME]: {
+    id: UpgradeType.PASSIVE_INCOME,
+    name: "Passive Income",
+    description: "Earn a small amount of cash even when you flip Tails.",
+    baseCost: 20,
+    // Significantly reduced costs: 20, 50, 150, 400, 1000, 2500
+    costTiers: [20, 50, 150, 400, 1000, 2500], 
+    maxLevel: 6,
+    getEffect: (level) => level, // Returns $0, $1, $2, etc.
+    formatEffect: (val) => `$${val}`,
+  },
   [UpgradeType.AUTO_FLIP]: {
     id: UpgradeType.AUTO_FLIP,
     name: "Auto Flipper",
@@ -68,5 +79,15 @@ export const UPGRADES: Record<UpgradeType, UpgradeConfig> = {
     maxLevel: 1,
     getEffect: (level) => level,
     formatEffect: (val) => val > 0 ? "ON" : "OFF",
+  },
+  [UpgradeType.EDGING]: {
+    id: UpgradeType.EDGING,
+    name: "Edging",
+    description: "10x income multiplier. Living on the edge.",
+    baseCost: 10000,
+    costTiers: [10000],
+    maxLevel: 1,
+    getEffect: (level) => level > 0 ? 10 : 1,
+    formatEffect: (val) => `${val}x`,
   },
 };
