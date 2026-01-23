@@ -1,34 +1,53 @@
-export type TrackingMode = 'both' | 'cal' | 'pro';
-
-export interface LogEntry {
-    id: string;
-    date: string; // YYYY-MM-DD
-    cal: number;
-    pro: number;
-    ts: number;
-    label?: string;
+export enum UpgradeType {
+  // Standard
+  CHANCE = 'CHANCE',
+  SPEED = 'SPEED',
+  COMBO = 'COMBO',
+  VALUE = 'VALUE',
+  AUTO_FLIP = 'AUTO_FLIP',
+  PASSIVE_INCOME = 'PASSIVE_INCOME',
+  EDGING = 'EDGING',
+  
+  // Prestige (Void)
+  PRESTIGE_KARMA = 'PRESTIGE_KARMA', // Starting money
+  PRESTIGE_FATE = 'PRESTIGE_FATE',   // Base chance increase
+  PRESTIGE_FLUX = 'PRESTIGE_FLUX',   // Base speed increase
+  
+  // New Prestige Unlocks
+  PRESTIGE_PASSIVE = 'PRESTIGE_PASSIVE', // Permanent Passive Income
+  PRESTIGE_AUTO = 'PRESTIGE_AUTO',       // Permanent Auto Flip
+  PRESTIGE_EDGING = 'PRESTIGE_EDGING',   // Permanent Edging
+  PRESTIGE_LIMITLESS = 'PRESTIGE_LIMITLESS', // Break all limits
+  PRESTIGE_MOM = 'PRESTIGE_MOM', // The forbidden button
 }
 
-export interface Goals {
-    cal: number;
-    pro: number;
+export interface UpgradeConfig {
+  id: UpgradeType;
+  name: string;
+  description: string;
+  baseCost: number;
+  costTiers: number[];
+  maxLevel: number;
+  limitlessMaxLevel?: number; // New max level when Limitless is active
+  isPrestige?: boolean; // If true, costs Void Fragments
+  // Function to calculate effect based on level
+  getEffect: (level: number) => number;
+  // Function to format the effect for display
+  formatEffect: (value: number) => string;
 }
 
-export interface Settings {
-    goals: Goals;
-    mode: TrackingMode;
-    name?: string;
+export interface GameState {
+  money: number;
+  streak: number;
+  maxStreak: number;
+  totalFlips: number;
+  upgrades: Record<UpgradeType, number>;
+  history: ('H' | 'T')[];
+  
+  // Prestige Data
+  prestigeLevel: number; // Multiplier for global income
+  voidFragments: number; // Currency for prestige shop
 }
 
-export interface Preset {
-    id: string;
-    label: string;
-    cal: number;
-    pro: number;
-}
-
-export interface AppData {
-    history: LogEntry[];
-    settings: Settings;
-    presets: Preset[];
-}
+export const WINNING_STREAK = 10;
+export const FRAGMENTS_PER_WIN = 5;
