@@ -448,7 +448,10 @@ const App: React.FC = () => {
                                 }}
                             >
                                 {/* Heads Side (Front) */}
-                                <div className="absolute inset-0 backface-hidden rounded-full bg-gradient-to-br from-amber-200 via-amber-500 to-amber-700 shadow-inner border-4 border-amber-600 flex items-center justify-center overflow-hidden">
+                                <div 
+                                    className="absolute inset-0 backface-hidden rounded-full bg-gradient-to-br from-amber-200 via-amber-500 to-amber-700 shadow-inner border-4 border-amber-600 flex items-center justify-center overflow-hidden"
+                                    style={{ transform: 'rotateX(0deg)' }}
+                                >
                                     {/* Texture details */}
                                     <div className="absolute inset-0 opacity-20 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')]"></div>
                                     <div className="absolute inset-2 border-2 border-dashed border-amber-300/30 rounded-full"></div>
