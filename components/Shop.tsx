@@ -67,9 +67,15 @@ const Shop: React.FC<ShopProps> = ({ money, voidFragments, prestigeLevel, upgrad
 
     const isMaxed = currentLevel >= effectiveMaxLevel;
     
-    const cost = isMaxed ? 0 : (upgrade.costTiers[currentLevel] || upgrade.costTiers[upgrade.costTiers.length - 1]);
+    let cost = isMaxed ? 0 : (upgrade.costTiers[currentLevel] || upgrade.costTiers[upgrade.costTiers.length - 1]);
     
     const isPrestige = upgrade.isPrestige || false;
+    
+    // Cap Void Fragment costs at 50
+    if (isPrestige && cost > 50) {
+        cost = 50;
+    }
+
     const currency = isPrestige ? voidFragments : money;
     const canAfford = !isMaxed && currency >= cost;
     
