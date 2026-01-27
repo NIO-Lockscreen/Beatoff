@@ -222,7 +222,7 @@ const App: React.FC = () => {
   
   // --- Actions ---
 
-  const handleFlip = useCallback((forceHeads: boolean = false) => {
+  const handleFlip = useCallback((forceHeads: boolean = false, isAuto: boolean = false) => {
     const isDebug = typeof forceHeads === 'boolean' && forceHeads === true;
 
     // IMPORTANT: Stop auto flipping if we reached the win condition (streak >= 10)
@@ -275,6 +275,9 @@ const App: React.FC = () => {
         const newMaxStreak = Math.max(prev.maxStreak, newStreak);
         const won = newStreak >= WINNING_STREAK;
         
+        // INVALIDATE PURIST RUN IF AUTO FLIP
+        const nextIsPuristRun = isAuto ? false : prev.isPuristRun;
+
         if (won && !hasWon) {
            setTimeout(() => {
                setHasWon(true);
@@ -284,8 +287,7 @@ const App: React.FC = () => {
                }
            }, 500);
            
-           // PURIST Logic - handled in state update, but sync handled by effect on hasWon
-           // We just need to ensure stats are updated correctly here
+           // PURIST Logic - Only increment if nextIsPuristRun is TRUE
         }
 
         if (isHeads) {
@@ -308,7 +310,7 @@ const App: React.FC = () => {
                 if (newStreak === 9 && prev.maxStreak < 9 && !edgingOwned && !prestigeEdgingOwned) message = "EDGING UNLOCKED";
 
                 setCelebration({ text: message, level: newStreak, id: Date.now() });
-                celebrationTimeoutRef.current = window.setTimeout(() => setCelebration(null), 2500) as any;
+                celebrationTimeoutRef.current = window.setTimeout(() => setCelebration(null), 2500) as unknown as number;
             }
         } else {
              if (currentSpeed > 50) AudioService.playTails();
@@ -320,7 +322,7 @@ const App: React.FC = () => {
         let nextActiveTitle = prev.activeTitle;
 
         if (won && !hasWon) {
-            if (prev.isPuristRun) {
+            if (nextIsPuristRun) {
                 nextStats.puristWins += 1;
                 // Unlock Purist Title
                 const level = nextStats.puristWins;
@@ -338,13 +340,14 @@ const App: React.FC = () => {
           history: [result as 'H'|'T', ...prev.history].slice(0, 10),
           stats: nextStats,
           unlockedTitles: nextTitles,
-          activeTitle: nextActiveTitle
+          activeTitle: nextActiveTitle,
+          isPuristRun: nextIsPuristRun // Apply invalidation
         };
       });
 
       setCoinSide(result);
       setIsFlipping(false);
-    }, duration) as any;
+    }, duration) as unknown as number;
 
   }, [isFlipping, hasWon, currentChance, currentSpeed, currentBaseValue, currentCombo, prestigeMultiplier, showMomModal, gameState.streak]);
 
@@ -416,7 +419,6 @@ const App: React.FC = () => {
             });
             
             // Trigger Leaderboard Update immediately for Mom Purchase
-            // We use the new state values (manually computed since state update is async)
             if (gameState.playerName) {
                 const name = gameState.hasCheated ? "cheater" : gameState.playerName;
                 const now = Date.now();
@@ -432,13 +434,8 @@ const App: React.FC = () => {
         return;
     }
 
-    // Auto Flip breaks Purist Run
-    if (type === UpgradeType.AUTO_FLIP || type === UpgradeType.PRESTIGE_AUTO) {
-        setGameState(prev => ({
-            ...prev,
-            isPuristRun: false
-        }));
-    }
+    // REMOVED manual isPuristRun=false for AUTO_FLIP. 
+    // It is now handled by handleFlip(..., true) being called by the auto-flipper effect.
 
     if (isPrestige) {
         if (gameState.voidFragments >= cost) {
@@ -529,7 +526,8 @@ const App: React.FC = () => {
           unlockedTitles: nextTitles,
           activeTitle: gameState.activeTitle || (newPrestigeLevel === 1 ? 'PRESTIGE' : gameState.activeTitle),
           isPuristRun: true, // Reset Purist run eligibility
-          hasCheated: gameState.hasCheated // Cheater status persists across prestige
+          hasCheated: gameState.hasCheated, // Cheater status persists across prestige
+          autoFlipEnabled: gameState.autoFlipEnabled // PRESERVE AUTOFLIP PREFERENCE
       };
 
       // Submit Scores ON ASCEND (New Game Start)
@@ -545,7 +543,7 @@ const App: React.FC = () => {
              { category: 'mommy', entry: { name, score: gameState.stats.momPurchases, date: now, title } }
           ];
 
-          // Filter out zero entries if needed (though existing check in LeaderboardService logic mostly handles it, better to be clean)
+          // Filter out zero entries if needed
           const validUpdates = updates.filter(u => u.entry.score > 0);
           if (validUpdates.length > 0) {
               LeaderboardService.submitScores(validUpdates);
@@ -596,7 +594,7 @@ const App: React.FC = () => {
         hardReset();
     } else {
         setDeleteConfirm(true);
-        deleteTimeoutRef.current = window.setTimeout(() => setDeleteConfirm(false), 3000) as any;
+        deleteTimeoutRef.current = window.setTimeout(() => setDeleteConfirm(false), 3000) as unknown as number;
     }
   };
 
@@ -609,8 +607,8 @@ const App: React.FC = () => {
       setGameState(prev => ({
           ...prev,
           autoFlipEnabled: !prev.autoFlipEnabled,
-          // Toggling auto flip disables purist run for this session
-          isPuristRun: false
+          // REMOVED manual isPuristRun: false
+          // Allowing toggling off to theoretically save a run if done before first flip
       }));
   };
   
@@ -667,7 +665,8 @@ const App: React.FC = () => {
     const shouldAutoFlip = hasAutoFlip && gameState.autoFlipEnabled && gameState.streak < 10;
     
     if (shouldAutoFlip && !isFlipping && !hasWon && !showMomModal.show) {
-        timer = window.setTimeout(() => handleFlip(false), 300) as any;
+        // CALL handleFlip with isAuto = true
+        timer = window.setTimeout(() => handleFlip(false, true), 300) as unknown as number;
     }
     return () => { if (timer) window.clearTimeout(timer); };
   }, [hasAutoFlip, isFlipping, hasWon, handleFlip, showMomModal, gameState.autoFlipEnabled, gameState.streak]);
@@ -677,18 +676,19 @@ const App: React.FC = () => {
       const failsafeInterval = window.setInterval(() => {
           const shouldAutoFlip = hasAutoFlip && gameState.autoFlipEnabled && gameState.streak < 10;
           if (shouldAutoFlip && !isFlipping && !hasWon && !showMomModal.show) {
-              handleFlip(false);
+              // CALL handleFlip with isAuto = true
+              handleFlip(false, true);
           }
-      }, 2000) as any; 
+      }, 2000) as unknown as number; 
       return () => window.clearInterval(failsafeInterval);
   }, [hasAutoFlip, gameState.autoFlipEnabled, gameState.streak, isFlipping, hasWon, showMomModal, handleFlip]);
 
 
   useEffect(() => {
     return () => {
-      if (flipTimeoutRef.current) window.clearTimeout(flipTimeoutRef.current);
-      if (celebrationTimeoutRef.current) window.clearTimeout(celebrationTimeoutRef.current);
-      if (deleteTimeoutRef.current) window.clearTimeout(deleteTimeoutRef.current as number);
+      if (flipTimeoutRef.current !== null) window.clearTimeout(flipTimeoutRef.current);
+      if (celebrationTimeoutRef.current !== null) window.clearTimeout(celebrationTimeoutRef.current);
+      if (deleteTimeoutRef.current !== null) window.clearTimeout(deleteTimeoutRef.current);
     };
   }, []);
 
