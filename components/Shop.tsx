@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { UpgradeType } from '../types';
 import { UPGRADES } from '../constants';
-import { Zap, TrendingUp, Clock, Coins, PlayCircle, ShieldCheck, Flame, Ghost, Sparkles, Hourglass, Infinity, Skull, Crown, Heart, Power, ChevronDown } from 'lucide-react';
+import { Zap, TrendingUp, Clock, Coins, PlayCircle, ShieldCheck, Flame, Ghost, Sparkles, Hourglass, Infinity, Skull, Crown, Heart, Power, Gem } from 'lucide-react';
 
 interface ShopProps {
   money: number;
@@ -14,6 +14,7 @@ interface ShopProps {
   onToggleAutoFlip: () => void;
   seenUpgrades: UpgradeType[];
   onSeen: (id: UpgradeType) => void;
+  momPurchases: number;
 }
 
 const ICONS = {
@@ -31,6 +32,7 @@ const ICONS = {
   [UpgradeType.PRESTIGE_PASSIVE]: Infinity,
   [UpgradeType.PRESTIGE_AUTO]: PlayCircle,
   [UpgradeType.PRESTIGE_EDGING]: Skull,
+  [UpgradeType.PRESTIGE_GOLD_DIGGER]: Gem,
   [UpgradeType.PRESTIGE_LIMITLESS]: Crown,
   [UpgradeType.PRESTIGE_MOM]: Heart,
 };
@@ -45,13 +47,15 @@ const Shop: React.FC<ShopProps> = ({
   autoFlipEnabled, 
   onToggleAutoFlip,
   seenUpgrades,
-  onSeen
+  onSeen,
+  momPurchases
 }) => {
   
   const hasLimitless = (upgrades[UpgradeType.PRESTIGE_LIMITLESS] || 0) > 0;
   const hasPrestigeEdging = (upgrades[UpgradeType.PRESTIGE_EDGING] || 0) > 0;
   
-  const [hasUnseenItems, setHasUnseenItems] = useState(false);
+  const [unseenCount, setUnseenCount] = useState(0);
+  const [showPopup, setShowPopup] = useState(false);
   const observerRef = useRef<IntersectionObserver | null>(null);
 
   // Helper to determine if an upgrade is currently visible (unlocked)
@@ -67,6 +71,7 @@ const Shop: React.FC<ShopProps> = ({
     if (upgradeId === UpgradeType.PRESTIGE_PASSIVE && prestigeLevel < 2) return false;
     if (upgradeId === UpgradeType.PRESTIGE_AUTO && prestigeLevel < 3) return false;
     if (upgradeId === UpgradeType.PRESTIGE_EDGING && prestigeLevel < 5) return false;
+    if (upgradeId === UpgradeType.PRESTIGE_GOLD_DIGGER && prestigeLevel < 10) return false;
     if (upgradeId === UpgradeType.PRESTIGE_LIMITLESS && prestigeLevel < 10) return false;
     if (upgradeId === UpgradeType.PRESTIGE_MOM && prestigeLevel < 15) return false;
 
@@ -88,14 +93,26 @@ const Shop: React.FC<ShopProps> = ({
     return true;
   }, [maxStreak, prestigeLevel, upgrades, hasPrestigeEdging]);
 
-  // Determine which items are currently unlocked but not yet seen
+  // Determine unseen count
   useEffect(() => {
     const allUpgrades = Object.values(UPGRADES);
     const unlocked = allUpgrades.filter(u => isUnlocked(u.id));
     const unseen = unlocked.filter(u => !seenUpgrades.includes(u.id));
-    
-    setHasUnseenItems(unseen.length > 0);
+    setUnseenCount(unseen.length);
   }, [isUnlocked, seenUpgrades]);
+
+  // Handle Popup Visibility (30s Timeout)
+  useEffect(() => {
+      if (unseenCount > 0) {
+          setShowPopup(true);
+          const timer = setTimeout(() => {
+              setShowPopup(false);
+          }, 30000); // 30 seconds auto-hide
+          return () => clearTimeout(timer);
+      } else {
+          setShowPopup(false);
+      }
+  }, [unseenCount]);
 
 
   // Setup IntersectionObserver
@@ -123,7 +140,7 @@ const Shop: React.FC<ShopProps> = ({
     unseenElements.forEach(el => observerRef.current?.observe(el));
 
     return () => observerRef.current?.disconnect();
-  }, [seenUpgrades, onSeen, hasUnseenItems]); // Re-run when seen list changes to update observers
+  }, [seenUpgrades, onSeen, unseenCount]);
 
 
   const renderUpgrade = (upgradeId: UpgradeType) => {
@@ -142,9 +159,15 @@ const Shop: React.FC<ShopProps> = ({
     const isPrestige = upgrade.isPrestige || false;
     
     if (isPrestige && cost > 50) cost = 50;
-
+    // Exception for Gold Digger & Mom
+    if (upgrade.id === UpgradeType.PRESTIGE_GOLD_DIGGER) cost = upgrade.costTiers[currentLevel] || upgrade.costTiers[upgrade.costTiers.length - 1];
+    
     const currency = isPrestige ? voidFragments : money;
-    const canAfford = !isMaxed && currency >= cost;
+    // Gold Digger is prestige but costs money
+    const isGoldDigger = upgrade.id === UpgradeType.PRESTIGE_GOLD_DIGGER;
+    const effectiveCurrency = isGoldDigger ? money : currency;
+
+    const canAfford = !isMaxed && effectiveCurrency >= cost;
     
     const Icon = ICONS[upgrade.id] || Zap;
     
@@ -166,24 +189,36 @@ const Shop: React.FC<ShopProps> = ({
     
     const isUnseen = !seenUpgrades.includes(upgrade.id);
 
+    // Dynamic Name Change for MOM
+    let displayName = upgrade.name;
+    if (isMom && momPurchases >= 10) {
+        displayName = "Milf Hunter";
+    }
+
     return (
       <div 
         key={upgrade.id} 
         data-upgrade-id={upgrade.id}
         className={`
             border p-3 group transition-colors animate-fade-in relative overflow-hidden
-            ${isPrestige 
-                ? 'bg-purple-950/20 border-purple-900/50 hover:border-purple-500/50' 
-                : isMom 
-                    ? 'bg-pink-950/20 border-pink-900/50 hover:border-pink-500/50'
-                    : 'bg-noir-950 border-noir-800 hover:border-noir-600'
+            ${isGoldDigger 
+                ? 'bg-amber-950/20 border-amber-700/50 hover:border-amber-500'
+                : isPrestige 
+                    ? 'bg-purple-950/20 border-purple-900/50 hover:border-purple-500/50' 
+                    : isMom 
+                        ? 'bg-pink-950/20 border-pink-900/50 hover:border-pink-500/50'
+                        : 'bg-noir-950 border-noir-800 hover:border-noir-600'
             }
             ${upgrade.id === UpgradeType.PRESTIGE_LIMITLESS ? 'border-amber-500/50 bg-amber-900/10' : ''}
             ${isUnseen ? 'unseen-upgrade' : ''}
         `}
       >
-        {isPrestige && (
+        {isPrestige && !isGoldDigger && (
             <div className="absolute -right-4 -top-4 w-12 h-12 bg-purple-500/10 blur-xl rounded-full pointer-events-none"></div>
+        )}
+        
+        {isGoldDigger && (
+            <div className="absolute -right-4 -top-4 w-16 h-16 bg-amber-500/10 blur-xl rounded-full pointer-events-none"></div>
         )}
         
         {upgrade.id === UpgradeType.PRESTIGE_LIMITLESS && (
@@ -200,19 +235,19 @@ const Shop: React.FC<ShopProps> = ({
         )}
 
         <div className="flex justify-between items-start mb-2 relative z-10">
-          <div className={`flex items-center gap-2 ${isPrestige ? 'text-purple-300' : 'text-noir-200'} ${upgrade.id === UpgradeType.PRESTIGE_LIMITLESS ? 'text-amber-400' : ''} ${isMom ? 'text-pink-300' : ''}`}>
+          <div className={`flex items-center gap-2 ${isGoldDigger ? 'text-amber-400' : isPrestige ? 'text-purple-300' : 'text-noir-200'} ${upgrade.id === UpgradeType.PRESTIGE_LIMITLESS ? 'text-amber-400' : ''} ${isMom ? 'text-pink-300' : ''}`}>
             <Icon size={16} />
-            <span className="font-bold font-mono text-sm">{upgrade.name}</span>
+            <span className="font-bold font-mono text-sm">{displayName}</span>
           </div>
-          <span className={`text-xs font-mono ${isPrestige ? 'text-purple-400' : 'text-noir-500'}`}>Lvl {currentLevel}</span>
+          <span className={`text-xs font-mono ${isPrestige && !isGoldDigger ? 'text-purple-400' : isGoldDigger ? 'text-amber-500' : 'text-noir-500'}`}>Lvl {currentLevel}</span>
         </div>
         
-        <p className={`text-xs mb-3 min-h-[2.5em] leading-relaxed ${isPrestige ? 'text-purple-200/70' : 'text-noir-400'}`}>
+        <p className={`text-xs mb-3 min-h-[2.5em] leading-relaxed ${isPrestige && !isGoldDigger ? 'text-purple-200/70' : isGoldDigger ? 'text-amber-200/70' : 'text-noir-400'}`}>
           {upgrade.description}
         </p>
 
         <div className={`flex justify-between items-center text-xs font-mono mb-3 p-2 rounded ${isPrestige ? 'bg-black/40' : 'bg-noir-900'}`}>
-            <span className={isPrestige ? 'text-purple-300' : 'text-noir-400'}>{currentEffect}</span>
+            <span className={isPrestige && !isGoldDigger ? 'text-purple-300' : isGoldDigger ? 'text-amber-400' : 'text-noir-400'}>{currentEffect}</span>
             <span className="text-noir-600">→</span>
             <span className={isMaxed ? 'text-amber-500' : 'text-white'}>{nextEffect}</span>
         </div>
@@ -243,18 +278,22 @@ const Shop: React.FC<ShopProps> = ({
                 ${isMaxed 
                 ? 'border-transparent text-noir-600 cursor-not-allowed bg-black/20' 
                 : canAfford
-                    ? isPrestige 
-                        ? 'border-purple-500 text-purple-100 hover:bg-purple-900/50 hover:border-purple-300 hover:shadow-[0_0_10px_rgba(168,85,247,0.2)] active:translate-y-0.5'
-                        : isMom
-                            ? 'border-pink-500 text-pink-100 hover:bg-pink-900/50 hover:border-pink-300 hover:shadow-[0_0_10px_rgba(236,72,153,0.2)] active:translate-y-0.5'
-                            : 'border-noir-600 text-white hover:bg-noir-800 hover:border-white active:translate-y-0.5'
-                    : isPrestige 
-                        ? 'border-purple-900/30 text-purple-700 cursor-not-allowed bg-black/20'
-                        : 'border-noir-800 text-noir-600 cursor-not-allowed bg-noir-950/50'
+                    ? isGoldDigger 
+                        ? 'border-amber-500 text-amber-100 hover:bg-amber-900/50 hover:border-amber-300 hover:shadow-[0_0_10px_rgba(245,158,11,0.2)] active:translate-y-0.5'
+                        : isPrestige 
+                            ? 'border-purple-500 text-purple-100 hover:bg-purple-900/50 hover:border-purple-300 hover:shadow-[0_0_10px_rgba(168,85,247,0.2)] active:translate-y-0.5'
+                            : isMom
+                                ? 'border-pink-500 text-pink-100 hover:bg-pink-900/50 hover:border-pink-300 hover:shadow-[0_0_10px_rgba(236,72,153,0.2)] active:translate-y-0.5'
+                                : 'border-noir-600 text-white hover:bg-noir-800 hover:border-white active:translate-y-0.5'
+                    : isGoldDigger
+                        ? 'border-amber-900/30 text-amber-700 cursor-not-allowed bg-black/20'
+                        : isPrestige 
+                            ? 'border-purple-900/30 text-purple-700 cursor-not-allowed bg-black/20'
+                            : 'border-noir-800 text-noir-600 cursor-not-allowed bg-noir-950/50'
                 }
             `}
             >
-            {isMaxed ? 'MAXED' : `${isPrestige ? '🟣 ' : '$'}${cost.toLocaleString()}`}
+            {isMaxed ? 'MAXED' : `${isPrestige && !isGoldDigger ? '🟣 ' : '$'}${cost.toLocaleString()}`}
             </button>
         </div>
       </div>
@@ -301,11 +340,11 @@ const Shop: React.FC<ShopProps> = ({
       </div>
 
       {/* NEW ITEMS INDICATOR */}
-      {hasUnseenItems && (
+      {showPopup && (
           <div className="fixed md:absolute bottom-6 left-1/2 md:left-1/2 -translate-x-1/2 z-[60] animate-bounce pointer-events-none">
               <div className="flex flex-col items-center">
                   <div className="px-4 py-2 bg-amber-500 text-black font-mono font-bold text-xs tracking-widest rounded shadow-lg shadow-amber-500/20 border border-amber-400">
-                      NEW UPGRADES
+                      NEW UPGRADES ({unseenCount})
                   </div>
                   <div className="w-0 h-0 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-t-[8px] border-t-amber-500 mt-[-1px]"></div>
               </div>

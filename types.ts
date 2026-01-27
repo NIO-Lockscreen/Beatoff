@@ -17,6 +17,7 @@ export enum UpgradeType {
   PRESTIGE_PASSIVE = 'PRESTIGE_PASSIVE', // Permanent Passive Income
   PRESTIGE_AUTO = 'PRESTIGE_AUTO',       // Permanent Auto Flip
   PRESTIGE_EDGING = 'PRESTIGE_EDGING',   // Permanent Edging
+  PRESTIGE_GOLD_DIGGER = 'PRESTIGE_GOLD_DIGGER', // New Multiplier
   PRESTIGE_LIMITLESS = 'PRESTIGE_LIMITLESS', // Break all limits
   PRESTIGE_MOM = 'PRESTIGE_MOM', // The forbidden button
 }
@@ -36,6 +37,21 @@ export interface UpgradeConfig {
   formatEffect: (value: number) => string;
 }
 
+export interface PlayerStats {
+  puristWins: number;      // Wins without auto flip
+  momPurchases: number;    // Times "Your Mom" was bought
+  highestCash: number;     // Highest cash ever held
+  totalPrestiges: number;  // Times prestiged
+}
+
+export interface Title {
+  id: string;
+  name: string;
+  level: number; // x1, x2, etc.
+  description: string;
+  secret?: boolean;
+}
+
 export interface GameState {
   money: number;
   streak: number;
@@ -51,7 +67,30 @@ export interface GameState {
   
   // UX
   seenUpgrades: UpgradeType[]; // List of upgrades user has scrolled to/seen
+  
+  // Leaderboard & Titles
+  playerName: string | null;
+  stats: PlayerStats;
+  unlockedTitles: Record<string, number>; // Key is Title ID, value is Level
+  activeTitle: string | null;
+  isPuristRun: boolean; // Tracks if current run has used auto flip
+  hasCheated: boolean; // Tracks if debug keys were used
 }
 
 export const WINNING_STREAK = 10;
 export const FRAGMENTS_PER_WIN = 5;
+
+// Leaderboard Types
+export interface LeaderboardEntry {
+  name: string;
+  score: number;
+  date: number;
+  title?: string;
+}
+
+export interface GlobalLeaderboard {
+  purist: LeaderboardEntry[];
+  prestige: LeaderboardEntry[];
+  rich: LeaderboardEntry[];
+  mommy: LeaderboardEntry[];
+}

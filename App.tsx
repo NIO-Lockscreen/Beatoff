@@ -1,11 +1,13 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { GameState, UpgradeType, WINNING_STREAK, FRAGMENTS_PER_WIN } from './types';
+import { GameState, UpgradeType, WINNING_STREAK, FRAGMENTS_PER_WIN, PlayerStats } from './types';
 import { UPGRADES } from './constants';
 import Shop from './components/Shop';
 import ProbabilityModal from './components/ProbabilityModal';
+import LeaderboardModal from './components/LeaderboardModal';
 import ConfettiSystem from './components/ConfettiSystem';
 import { AudioService } from './services/audioService';
-import { HelpCircle, Trash2, Trophy, Volume2, VolumeX, Sparkles, AlertCircle, Heart } from 'lucide-react';
+import { LeaderboardService } from './services/leaderboardService';
+import { HelpCircle, Trash2, Trophy, Volume2, VolumeX, Sparkles, AlertCircle, Heart, List, Crown } from 'lucide-react';
 
 const CELEBRATION_MESSAGES = [
   "", 
@@ -33,6 +35,13 @@ const COMPLIMENTS = [
     "Your potential is limitless."
 ];
 
+const INITIAL_STATS: PlayerStats = {
+    puristWins: 0,
+    momPurchases: 0,
+    highestCash: 0,
+    totalPrestiges: 0,
+};
+
 const INITIAL_STATE: GameState = {
   money: 0,
   streak: 0,
@@ -53,6 +62,7 @@ const INITIAL_STATE: GameState = {
     [UpgradeType.PRESTIGE_PASSIVE]: 0,
     [UpgradeType.PRESTIGE_AUTO]: 0,
     [UpgradeType.PRESTIGE_EDGING]: 0,
+    [UpgradeType.PRESTIGE_GOLD_DIGGER]: 0,
     [UpgradeType.PRESTIGE_LIMITLESS]: 0,
     [UpgradeType.PRESTIGE_MOM]: 0,
   },
@@ -61,6 +71,14 @@ const INITIAL_STATE: GameState = {
   voidFragments: 0,
   autoFlipEnabled: true,
   seenUpgrades: [UpgradeType.CHANCE, UpgradeType.SPEED, UpgradeType.COMBO, UpgradeType.VALUE], // Base items always seen
+  
+  // New State
+  playerName: null,
+  stats: INITIAL_STATS,
+  unlockedTitles: {},
+  activeTitle: null,
+  isPuristRun: true,
+  hasCheated: false,
 };
 
 const SAVE_KEY = 'beatTheOdds_save';
@@ -96,6 +114,12 @@ const App: React.FC = () => {
             });
         }
         
+        // Init New Logic
+        if (!parsed.stats) parsed.stats = INITIAL_STATS;
+        if (!parsed.unlockedTitles) parsed.unlockedTitles = {};
+        if (typeof parsed.isPuristRun === 'undefined') parsed.isPuristRun = true;
+        if (typeof parsed.hasCheated === 'undefined') parsed.hasCheated = false;
+
         return parsed;
       }
     } catch (e) {
@@ -107,11 +131,13 @@ const App: React.FC = () => {
   const [isFlipping, setIsFlipping] = useState(false);
   const [coinSide, setCoinSide] = useState<'H' | 'T' | null>(null);
   const [showModal, setShowModal] = useState(false);
+  const [showLeaderboard, setShowLeaderboard] = useState(false);
   const [showMomModal, setShowMomModal] = useState<{show: boolean, text: string}>({show: false, text: ""});
   const [hasWon, setHasWon] = useState(false);
   const [celebration, setCelebration] = useState<{text: string, level: number, id: number} | null>(null);
   const [muted, setMuted] = useState(true);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
+  const [showTitleSelector, setShowTitleSelector] = useState(false);
 
   const flipTimeoutRef = useRef<number | null>(null);
   const celebrationTimeoutRef = useRef<number | null>(null);
@@ -158,13 +184,103 @@ const App: React.FC = () => {
   
   const prestigeMultiplier = 1 + (gameState.prestigeLevel * 0.1);
 
+  // --- Helper: Unlock Title ---
+  const unlockTitle = useCallback((titleId: string, level: number = 1) => {
+     setGameState(prev => {
+         const currentLevel = prev.unlockedTitles[titleId] || 0;
+         if (level > currentLevel) {
+             // New title or level up
+             if (!prev.activeTitle) {
+                 return {
+                     ...prev,
+                     unlockedTitles: { ...prev.unlockedTitles, [titleId]: level },
+                     activeTitle: titleId // Auto equip if none equipped
+                 };
+             }
+             return {
+                 ...prev,
+                 unlockedTitles: { ...prev.unlockedTitles, [titleId]: level }
+             };
+         }
+         return prev;
+     });
+  }, []);
+
+  // --- Logic Checks (Rich) ---
+  useEffect(() => {
+      if (gameState.money > 10000000) {
+          unlockTitle('RICH', 1);
+      }
+      if (gameState.money > gameState.stats.highestCash) {
+          setGameState(prev => ({
+              ...prev,
+              stats: { ...prev.stats, highestCash: prev.money }
+          }));
+      }
+  }, [gameState.money, gameState.stats.highestCash, unlockTitle]);
+
+  // --- Automatic Leaderboard Submission: Purist ---
+  useEffect(() => {
+      if (gameState.playerName && gameState.stats.puristWins > 0) {
+           const finalName = gameState.hasCheated ? "cheater" : gameState.playerName;
+           LeaderboardService.submitScore('purist', {
+               name: finalName,
+               score: gameState.stats.puristWins,
+               date: Date.now(),
+               title: gameState.activeTitle || undefined
+           });
+      }
+  }, [gameState.stats.puristWins, gameState.playerName, gameState.hasCheated, gameState.activeTitle]);
+
+  // --- Automatic Leaderboard Submission: Rich ---
+  useEffect(() => {
+      if (gameState.playerName && gameState.stats.highestCash > 0) {
+           const finalName = gameState.hasCheated ? "cheater" : gameState.playerName;
+           LeaderboardService.submitScore('rich', {
+               name: finalName,
+               score: gameState.stats.highestCash,
+               date: Date.now(),
+               title: gameState.activeTitle || undefined
+           });
+      }
+  }, [gameState.stats.highestCash, gameState.playerName, gameState.hasCheated, gameState.activeTitle]);
+
+  // --- Automatic Leaderboard Submission: Mommy ---
+  useEffect(() => {
+      if (gameState.playerName && gameState.stats.momPurchases > 0) {
+           const finalName = gameState.hasCheated ? "cheater" : gameState.playerName;
+           LeaderboardService.submitScore('mommy', {
+               name: finalName,
+               score: gameState.stats.momPurchases,
+               date: Date.now(),
+               title: gameState.activeTitle || undefined
+           });
+      }
+  }, [gameState.stats.momPurchases, gameState.playerName, gameState.hasCheated, gameState.activeTitle]);
+
+  // --- Automatic Leaderboard Submission: Prestige (On Win) ---
+  useEffect(() => {
+      // If we just won, we have effectively reached the next prestige level
+      // This saves "Prestige + 1" to the leaderboard before the player actually ascends
+      if (hasWon && gameState.playerName) {
+           const finalName = gameState.hasCheated ? "cheater" : gameState.playerName;
+           const effectivePrestige = gameState.prestigeLevel + 1;
+           LeaderboardService.submitScore('prestige', {
+               name: finalName,
+               score: effectivePrestige,
+               date: Date.now(),
+               title: gameState.activeTitle || undefined
+           });
+      }
+  }, [hasWon, gameState.playerName, gameState.prestigeLevel, gameState.hasCheated, gameState.activeTitle]);
+
+
   // --- Actions ---
 
   const handleFlip = useCallback((forceHeads: boolean = false) => {
     const isDebug = typeof forceHeads === 'boolean' && forceHeads === true;
 
     // IMPORTANT: Stop auto flipping if we reached the win condition (streak >= 10)
-    // We check this here to prevent the auto-loop from continuing unnecessarily.
     if (gameState.streak >= 10 && !forceHeads && !hasWon) {
         // Just let the last animation finish and trigger win
     }
@@ -189,47 +305,53 @@ const App: React.FC = () => {
         
         let earned = 0;
         if (isHeads) {
-            // Formula: Base * (1 + (Streak * ComboBonus))
             earned = Math.floor(currentBaseValue * (newStreak > 1 ? (1 + (newStreak * (currentCombo - 1))) : 1));
         } else {
-            // Passive Income Calculation (Standard + Prestige)
             const passiveLevel = prev.upgrades[UpgradeType.PASSIVE_INCOME] || 0;
-            // Buffed Standard Passive Income: Scaled by Prestige Level
             const standardPassive = UPGRADES[UpgradeType.PASSIVE_INCOME].getEffect(passiveLevel) * (1 + prev.prestigeLevel);
-            
             const voidPassiveLevel = prev.upgrades[UpgradeType.PRESTIGE_PASSIVE] || 0;
             const voidPassive = UPGRADES[UpgradeType.PRESTIGE_PASSIVE].getEffect(voidPassiveLevel);
-            
             if (standardPassive > 0 || voidPassive > 0) {
                 earned = standardPassive + voidPassive;
             }
         }
         
-        // Edging Multiplier
         const edgingLevel = prev.upgrades[UpgradeType.EDGING] || 0;
         const voidEdgingLevel = prev.upgrades[UpgradeType.PRESTIGE_EDGING] || 0;
-        
         if (edgingLevel > 0 || voidEdgingLevel > 0) earned *= 10;
+
+        // Gold Digger Multiplier
+        const goldDiggerLevel = prev.upgrades[UpgradeType.PRESTIGE_GOLD_DIGGER] || 0;
+        const goldDiggerMulti = UPGRADES[UpgradeType.PRESTIGE_GOLD_DIGGER].getEffect(goldDiggerLevel);
+        if (goldDiggerMulti > 1) earned *= goldDiggerMulti;
         
-        // Apply Prestige Multiplier
         earned = Math.floor(earned * prestigeMultiplier);
         
         const newMaxStreak = Math.max(prev.maxStreak, newStreak);
         const won = newStreak >= WINNING_STREAK;
         
         if (won && !hasWon) {
-           setTimeout(() => setHasWon(true), 500);
+           setTimeout(() => {
+               setHasWon(true);
+               // Trigger Leaderboard / Name Entry
+               if (!prev.playerName) {
+                   setShowLeaderboard(true);
+               }
+           }, 500);
+           
+           // PURIST Logic
+           if (prev.isPuristRun) {
+               const newPuristCount = prev.stats.puristWins + 1;
+               // State will be updated, useEffect will trigger submission
+           }
         }
 
         if (isHeads) {
-             // Audio throttle
              if (currentSpeed > 50 || newStreak % 10 === 0) {
                  AudioService.playHeads(newStreak);
              }
-            
             if (newStreak >= 2) {
                 if (celebrationTimeoutRef.current) window.clearTimeout(celebrationTimeoutRef.current);
-                
                 let message = CELEBRATION_MESSAGES[Math.min(newStreak, CELEBRATION_MESSAGES.length - 1)] || "GODLIKE";
                 if (newStreak > 10) message = "OVERACHIEVER";
                 
@@ -240,15 +362,29 @@ const App: React.FC = () => {
                 const prestigeEdgingOwned = (prev.upgrades[UpgradeType.PRESTIGE_EDGING] || 0) > 0;
 
                 if (newStreak === 3 && prev.maxStreak < 3 && !passiveOwned) message = "PASSIVE INCOME UNLOCKED";
-                // Hide reward messages if prestige version is owned
                 if (newStreak === 5 && prev.maxStreak < 5 && !autoFlipOwned && !prestigeAutoOwned) message = "AUTO FLIP UNLOCKED";
                 if (newStreak === 9 && prev.maxStreak < 9 && !edgingOwned && !prestigeEdgingOwned) message = "EDGING UNLOCKED";
 
                 setCelebration({ text: message, level: newStreak, id: Date.now() });
-                celebrationTimeoutRef.current = window.setTimeout(() => setCelebration(null), 2500);
+                celebrationTimeoutRef.current = window.setTimeout(() => setCelebration(null), 2500) as unknown as number;
             }
         } else {
              if (currentSpeed > 50) AudioService.playTails();
+        }
+
+        // Stats Update for Win
+        let nextStats = { ...prev.stats };
+        let nextTitles = { ...prev.unlockedTitles };
+        let nextActiveTitle = prev.activeTitle;
+
+        if (won && !hasWon) {
+            if (prev.isPuristRun) {
+                nextStats.puristWins += 1;
+                // Unlock Purist Title
+                const level = nextStats.puristWins;
+                nextTitles['PURIST'] = level;
+                if (!nextActiveTitle) nextActiveTitle = 'PURIST';
+            }
         }
 
         return {
@@ -258,12 +394,15 @@ const App: React.FC = () => {
           maxStreak: newMaxStreak,
           totalFlips: prev.totalFlips + 1,
           history: [result as 'H'|'T', ...prev.history].slice(0, 10),
+          stats: nextStats,
+          unlockedTitles: nextTitles,
+          activeTitle: nextActiveTitle
         };
       });
 
       setCoinSide(result);
       setIsFlipping(false);
-    }, duration);
+    }, duration) as unknown as number;
 
   }, [isFlipping, hasWon, currentChance, currentSpeed, currentBaseValue, currentCombo, prestigeMultiplier, showMomModal, gameState.streak]);
 
@@ -278,17 +417,14 @@ const App: React.FC = () => {
       }
 
       const available = COMPLIMENTS.filter(c => !seen.includes(c));
-      
-      // If all seen, maybe reset or just pick random? Let's just pick random if exhausted.
       const pool = available.length > 0 ? available : COMPLIMENTS;
       const text = pool[Math.floor(Math.random() * pool.length)];
 
       setShowMomModal({ show: true, text });
-      AudioService.playWin(); // Fanfare for the trap
+      AudioService.playWin(); 
   };
 
   const handleMomConfirm = () => {
-      // 1. Record seen
       let seen: string[] = [];
       try {
           const s = localStorage.getItem(SEEN_COMPLIMENTS_KEY);
@@ -299,58 +435,75 @@ const App: React.FC = () => {
           }
       } catch (e) { console.error(e); }
 
-      // 2. Wipe Save
+      // Reset
       localStorage.removeItem(SAVE_KEY);
-
-      // 3. Visual glitch effect then reset
       setShowMomModal({ show: false, text: "" });
       
-      // Just hard reset state
-      setGameState(JSON.parse(JSON.stringify(INITIAL_STATE)));
+      // Preserve Leaderboard Identity but reset run
+      const freshState = JSON.parse(JSON.stringify(INITIAL_STATE));
+      freshState.playerName = gameState.playerName;
+      freshState.stats = gameState.stats;
+      freshState.unlockedTitles = gameState.unlockedTitles;
+      freshState.activeTitle = gameState.activeTitle;
+      freshState.hasCheated = false; // RESET CHEATER FLAG ON RESET
+
+      setGameState(freshState);
       setHasWon(false);
       setCoinSide(null);
       setCelebration(null);
-      window.location.reload(); // Hardest reset
+      window.location.reload(); 
   };
 
   const buyUpgrade = (type: UpgradeType, cost: number, isPrestige: boolean) => {
     // Intercept "Your Mom" upgrade
     if (type === UpgradeType.PRESTIGE_MOM) {
         if (gameState.money >= cost) {
-            setGameState(prev => ({
-                ...prev,
-                money: prev.money - cost
-            }));
+            setGameState(prev => {
+                const nextStats = { ...prev.stats, momPurchases: prev.stats.momPurchases + 1 };
+                // Unlock Title
+                const nextTitles = { ...prev.unlockedTitles };
+                if (nextStats.momPurchases > 1) {
+                     nextTitles['MOMMY'] = nextStats.momPurchases;
+                }
+                return {
+                    ...prev,
+                    money: prev.money - cost,
+                    stats: nextStats,
+                    unlockedTitles: nextTitles
+                };
+            });
             triggerMomEvent();
         }
         return;
     }
 
+    // Auto Flip breaks Purist Run
+    if (type === UpgradeType.AUTO_FLIP || type === UpgradeType.PRESTIGE_AUTO) {
+        setGameState(prev => ({
+            ...prev,
+            isPuristRun: false
+        }));
+    }
+
     if (isPrestige) {
         if (gameState.voidFragments >= cost) {
-            setGameState(prev => {
+            setGameState((prev: GameState) => {
                 let extraMoney = 0;
-                // Immediate payout for Karma Upgrade
                 if (type === UpgradeType.PRESTIGE_KARMA) {
-                    const currentLevel = prev.upgrades[type] || 0;
+                    const currentLevel = (prev.upgrades[type] as number) || 0;
                     const nextLevel = currentLevel + 1;
                     const prevEffect = UPGRADES[type].getEffect(currentLevel);
                     const nextEffect = UPGRADES[type].getEffect(nextLevel);
                     extraMoney = nextEffect - prevEffect;
                 }
 
-                if (extraMoney > 0) {
-                     AudioService.playFlip(); 
-                }
+                if (extraMoney > 0) AudioService.playFlip(); 
 
                 return {
                     ...prev,
                     voidFragments: prev.voidFragments - cost,
                     money: prev.money + extraMoney,
-                    upgrades: {
-                        ...prev.upgrades,
-                        [type]: (prev.upgrades[type] || 0) + 1
-                    }
+                    upgrades: { ...prev.upgrades, [type]: (prev.upgrades[type] || 0) + 1 }
                 };
             });
         }
@@ -359,27 +512,19 @@ const App: React.FC = () => {
             setGameState(prev => ({
                 ...prev,
                 money: prev.money - cost,
-                upgrades: {
-                    ...prev.upgrades,
-                    [type]: (prev.upgrades[type] || 0) + 1
-                }
+                upgrades: { ...prev.upgrades, [type]: (prev.upgrades[type] || 0) + 1 }
             }));
         }
     }
   };
   
-  // Callback when a user sees a new upgrade
   const handleUpgradeSeen = useCallback((id: UpgradeType) => {
       setGameState(prev => {
           if (prev.seenUpgrades.includes(id)) return prev;
-          return {
-              ...prev,
-              seenUpgrades: [...prev.seenUpgrades, id]
-          };
+          return { ...prev, seenUpgrades: [...prev.seenUpgrades, id] };
       });
   }, []);
 
-  // HARD RESET (Delete Save)
   const hardReset = () => {
     localStorage.removeItem(SAVE_KEY);
     setGameState(JSON.parse(JSON.stringify(INITIAL_STATE)));
@@ -389,13 +534,10 @@ const App: React.FC = () => {
     setDeleteConfirm(false);
   };
 
-  // ASCEND (Prestige Reset)
   const ascend = () => {
-      // 1. Calculate Start Money based on Karma
       const karmaLevel = gameState.upgrades[UpgradeType.PRESTIGE_KARMA] || 0;
       const startMoney = UPGRADES[UpgradeType.PRESTIGE_KARMA].getEffect(karmaLevel);
 
-      // 2. Preserve Prestige Upgrades
       const prestigeUpgrades: Record<string, number> = {};
       Object.keys(gameState.upgrades).forEach(key => {
           const k = key as UpgradeType;
@@ -406,25 +548,75 @@ const App: React.FC = () => {
           }
       });
 
-      // 3. New State
-      // SCALING VOID REWARDS: Base + (PrestigeLevel * 5)
-      const voidReward = FRAGMENTS_PER_WIN + (gameState.prestigeLevel * 5);
+      // Fixed reward of 5 fragments per clear, removed prestige scaling
+      const voidReward = FRAGMENTS_PER_WIN;
+
+      // Unlock Prestiger Title
+      const newPrestigeLevel = gameState.prestigeLevel + 1;
+      const nextTitles = { ...gameState.unlockedTitles };
+      if (newPrestigeLevel > 0) {
+          nextTitles['PRESTIGE'] = newPrestigeLevel;
+      }
+      
+      const nextStats = { ...gameState.stats, totalPrestiges: gameState.stats.totalPrestiges + 1 };
 
       const nextState: GameState = {
           ...INITIAL_STATE,
           money: startMoney,
-          prestigeLevel: gameState.prestigeLevel + 1,
+          prestigeLevel: newPrestigeLevel,
           voidFragments: gameState.voidFragments + voidReward,
           upgrades: prestigeUpgrades as Record<UpgradeType, number>,
           totalFlips: 0, 
-          // Preserve seen upgrades so they don't blink again on new run
-          seenUpgrades: gameState.seenUpgrades
+          seenUpgrades: gameState.seenUpgrades,
+          // Preserve Identity
+          playerName: gameState.playerName,
+          stats: nextStats,
+          unlockedTitles: nextTitles,
+          activeTitle: gameState.activeTitle || (newPrestigeLevel === 1 ? 'PRESTIGE' : gameState.activeTitle),
+          isPuristRun: true, // Reset Purist run eligibility
+          hasCheated: gameState.hasCheated // Cheater status persists across prestige
       };
 
       setGameState(nextState);
       setHasWon(false);
       setCoinSide(null);
       setCelebration(null);
+      
+      // Submit score if registered
+      if (gameState.playerName) {
+          LeaderboardService.submitScore('prestige', {
+             name: gameState.hasCheated ? "cheater" : gameState.playerName,
+             score: newPrestigeLevel,
+             date: Date.now(),
+             title: gameState.activeTitle || undefined
+          });
+      }
+  };
+
+  const registerName = (name: string) => {
+      // Force "cheater" if flag is set
+      const finalName = gameState.hasCheated ? "cheater" : name;
+      
+      setGameState(prev => ({ ...prev, playerName: finalName }));
+      
+      // Calculate effective prestige (Current + 1 if run is completed/won)
+      // This ensures if a player wins but hasn't clicked "Ascend" yet, the leaderboard reflects their achievement
+      const effectivePrestige = hasWon ? gameState.prestigeLevel + 1 : gameState.prestigeLevel;
+
+      // Perform initial syncs
+      LeaderboardService.submitScore('rich', { name: finalName, score: gameState.stats.highestCash, date: Date.now(), title: gameState.activeTitle || undefined });
+      
+      if (gameState.stats.puristWins > 0) {
+          LeaderboardService.submitScore('purist', { name: finalName, score: gameState.stats.puristWins, date: Date.now(), title: gameState.activeTitle || undefined });
+      }
+      
+      if (effectivePrestige > 0) {
+          LeaderboardService.submitScore('prestige', { name: finalName, score: effectivePrestige, date: Date.now(), title: gameState.activeTitle || undefined });
+      }
+      
+      if (gameState.stats.momPurchases > 0) {
+          LeaderboardService.submitScore('mommy', { name: finalName, score: gameState.stats.momPurchases, date: Date.now(), title: gameState.activeTitle || undefined });
+      }
   };
 
   const handleDeleteClick = () => {
@@ -432,7 +624,7 @@ const App: React.FC = () => {
         hardReset();
     } else {
         setDeleteConfirm(true);
-        deleteTimeoutRef.current = window.setTimeout(() => setDeleteConfirm(false), 3000);
+        deleteTimeoutRef.current = window.setTimeout(() => setDeleteConfirm(false), 3000) as unknown as number;
     }
   };
 
@@ -444,35 +636,59 @@ const App: React.FC = () => {
   const toggleAutoFlip = () => {
       setGameState(prev => ({
           ...prev,
-          autoFlipEnabled: !prev.autoFlipEnabled
+          autoFlipEnabled: !prev.autoFlipEnabled,
+          // Toggling auto flip disables purist run for this session
+          isPuristRun: false
       }));
   };
+  
+  // Submit Rich score periodically if cash increases
+  useEffect(() => {
+      const timer = window.setInterval(() => {
+          if (gameState.playerName && gameState.money > 0) {
+             const finalName = gameState.hasCheated ? "cheater" : gameState.playerName;
+             LeaderboardService.submitScore('rich', { name: finalName, score: gameState.stats.highestCash, date: Date.now(), title: gameState.activeTitle || undefined });
+          }
+      }, 60000); // Check every minute
+      return () => window.clearInterval(timer as unknown as number);
+  }, [gameState.playerName, gameState.money, gameState.stats.highestCash, gameState.activeTitle, gameState.hasCheated]);
 
   // --- Keyboard Shortcuts ---
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+        // Anti-Cheat: Don't trigger cheats OR flag as cheater if user is typing in an input (e.g. name field)
+        const target = e.target as HTMLElement;
+        if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return;
+
         if (e.code === 'Space') {
             e.preventDefault(); 
             handleFlip(false);
         }
-        // DEBUG KEYS
+        // DEBUG KEYS (Triggers Cheater Flag)
         if (e.code === 'KeyQ') {
-            handleFlip(true); // Force Heads
-            // DEBUG: Add Void Fragments
-            setGameState(prev => ({ ...prev, voidFragments: prev.voidFragments + 5 }));
+            handleFlip(true); 
+            setGameState(prev => ({ 
+                ...prev, 
+                voidFragments: prev.voidFragments + 5,
+                hasCheated: true 
+            }));
         }
         if (e.code === 'KeyZ') {
-            // DEBUG: Add Money
-            setGameState(prev => ({ ...prev, money: prev.money + 10000 }));
+            setGameState(prev => ({ 
+                ...prev, 
+                money: prev.money + 10000,
+                hasCheated: true
+            }));
         }
 
-        // HIDDEN CODE: ZEX (+5 Prestige)
+        // HIDDEN CODE: ZEX (+5 Prestige) - This is a secret code, not a cheat, so we don't flag it? 
+        // Or should we? Assuming secret codes are features, debug keys are cheats.
         if (e.key) {
-           cheatCodeBuffer.current = (cheatCodeBuffer.current + e.key).toUpperCase().slice(-3);
+           cheatCodeBuffer.current = (cheatCodeBuffer.current + (e.key as string)).toUpperCase().slice(-3);
            if (cheatCodeBuffer.current === "ZEX") {
-               setGameState(prev => ({
+               setGameState((prev: GameState) => ({
                    ...prev,
-                   prestigeLevel: prev.prestigeLevel + 5
+                   prestigeLevel: (prev.prestigeLevel as number) + 5
                }));
                AudioService.playWin();
                cheatCodeBuffer.current = "";
@@ -487,26 +703,23 @@ const App: React.FC = () => {
   // --- Auto Flip Effect ---
   useEffect(() => {
     let timer: number;
-    // Check if auto flip is active AND enabled AND streak < 10
     const shouldAutoFlip = hasAutoFlip && gameState.autoFlipEnabled && gameState.streak < 10;
     
     if (shouldAutoFlip && !isFlipping && !hasWon && !showMomModal.show) {
-        timer = window.setTimeout(() => handleFlip(false), 300);
+        timer = window.setTimeout(() => handleFlip(false), 300) as unknown as number;
     }
     return () => { if (timer) window.clearTimeout(timer); };
   }, [hasAutoFlip, isFlipping, hasWon, handleFlip, showMomModal, gameState.autoFlipEnabled, gameState.streak]);
 
   // --- Auto Flip Failsafe ---
-  // If the game state thinks it should be auto-flipping but isn't, kickstart it.
   useEffect(() => {
-      const failsafeInterval = setInterval(() => {
+      const failsafeInterval = window.setInterval(() => {
           const shouldAutoFlip = hasAutoFlip && gameState.autoFlipEnabled && gameState.streak < 10;
           if (shouldAutoFlip && !isFlipping && !hasWon && !showMomModal.show) {
-              // If we are here, the main loop might have stalled.
               handleFlip(false);
           }
-      }, 2000); // Check every 2 seconds
-      return () => clearInterval(failsafeInterval);
+      }, 2000) as unknown as number; 
+      return () => window.clearInterval(failsafeInterval);
   }, [hasAutoFlip, gameState.autoFlipEnabled, gameState.streak, isFlipping, hasWon, showMomModal, handleFlip]);
 
 
@@ -518,6 +731,15 @@ const App: React.FC = () => {
     };
   }, []);
 
+  const getTitleDisplay = (key: string, level: number) => {
+      let suffix = level > 1 ? ` x${level}` : '';
+      if (key === 'PURIST') return `Purist${suffix}`;
+      if (key === 'PRESTIGE') return `Prestiger${suffix}`;
+      if (key === 'RICH') return `High Roller${suffix}`;
+      if (key === 'MOMMY') return `Mommy Lover${suffix}`;
+      return key;
+  };
+
   return (
     <div className={`min-h-screen md:h-screen md:overflow-hidden overflow-y-auto bg-noir-950 text-noir-200 font-sans selection:bg-amber-900 selection:text-white flex flex-col md:flex-row relative transition-colors duration-200 ${celebration && celebration.level >= 8 ? 'bg-noir-900' : ''}`}>
       
@@ -525,6 +747,53 @@ const App: React.FC = () => {
       <div className="bg-noise pointer-events-none fixed inset-0 z-0" />
       <div className="bg-vignette pointer-events-none fixed inset-0 z-0" />
       <ConfettiSystem streak={gameState.streak} />
+      
+      {/* Title Bar (Top Overlay) */}
+      {gameState.activeTitle && (
+          <div 
+            onClick={() => setShowTitleSelector(true)}
+            className="fixed top-4 left-1/2 -translate-x-1/2 z-[60] cursor-pointer group"
+          >
+              <div className="flex items-center gap-2 px-3 py-1 bg-noir-900/80 border border-amber-500/30 rounded-full backdrop-blur hover:bg-noir-800 transition-all shadow-[0_0_10px_rgba(245,158,11,0.1)]">
+                  <Crown size={12} className="text-amber-500" />
+                  <span className="text-xs font-mono font-bold text-amber-200 tracking-widest uppercase">
+                    {getTitleDisplay(gameState.activeTitle, gameState.unlockedTitles[gameState.activeTitle] || 1)}
+                  </span>
+                  {gameState.playerName && <span className="text-xs text-noir-500 font-mono">| {gameState.hasCheated ? "cheater" : gameState.playerName}</span>}
+              </div>
+          </div>
+      )}
+
+      {/* Title Selector Modal */}
+      {showTitleSelector && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in" onClick={() => setShowTitleSelector(false)}>
+              <div className="bg-noir-900 border border-noir-700 p-6 max-w-sm w-full shadow-2xl" onClick={e => e.stopPropagation()}>
+                  <h3 className="text-xl font-mono font-bold text-white mb-4 flex items-center gap-2">
+                      <Crown size={20} className="text-amber-500" /> Select Title
+                  </h3>
+                  <div className="space-y-2 max-h-[60vh] overflow-y-auto">
+                      {Object.entries(gameState.unlockedTitles).map(([key, level]) => (
+                          <button
+                            key={key}
+                            onClick={() => {
+                                setGameState(prev => ({ ...prev, activeTitle: key }));
+                                setShowTitleSelector(false);
+                            }}
+                            className={`w-full text-left p-3 font-mono text-sm border transition-colors flex justify-between items-center
+                                ${gameState.activeTitle === key 
+                                    ? 'bg-amber-900/30 border-amber-500 text-amber-100' 
+                                    : 'bg-black border-noir-800 text-noir-400 hover:border-noir-500 hover:text-white'
+                                }
+                            `}
+                          >
+                              <span>{getTitleDisplay(key, level)}</span>
+                              {gameState.activeTitle === key && <div className="w-2 h-2 rounded-full bg-amber-500"></div>}
+                          </button>
+                      ))}
+                  </div>
+              </div>
+          </div>
+      )}
       
       {/* Celebration Overlay */}
       {celebration && (
@@ -623,7 +892,7 @@ const App: React.FC = () => {
                         <div className="pt-4 border-t border-noir-800 mt-4">
                             <p className="text-sm">Total Attempts: {gameState.totalFlips.toLocaleString()}</p>
                             <p className="text-purple-400 font-bold text-lg mt-2 flex items-center justify-center gap-2">
-                                <Sparkles size={16} /> REWARD: {FRAGMENTS_PER_WIN + (gameState.prestigeLevel * 5)} VOID FRAGMENTS
+                                <Sparkles size={16} /> REWARD: {FRAGMENTS_PER_WIN} VOID FRAGMENTS
                             </p>
                         </div>
                     </div>
@@ -724,6 +993,11 @@ const App: React.FC = () => {
             </div>
             
             <div className="flex gap-4">
+                 {(gameState.playerName || hasWon) && (
+                     <button onClick={() => setShowLeaderboard(true)} className="p-2 text-amber-500 hover:text-white transition-colors hover:bg-amber-900/50 rounded-full cursor-pointer animate-fade-in" title="Leaderboard">
+                        <List size={20} />
+                    </button>
+                 )}
                  <button onClick={toggleMute} className="p-2 text-noir-500 hover:text-white transition-colors hover:bg-noir-900 rounded-full cursor-pointer" title={muted ? "Unmute" : "Mute"}>
                     {muted ? <VolumeX size={20} /> : <Volume2 size={20} />}
                 </button>
@@ -749,10 +1023,23 @@ const App: React.FC = () => {
         onToggleAutoFlip={toggleAutoFlip}
         seenUpgrades={gameState.seenUpgrades}
         onSeen={handleUpgradeSeen}
+        momPurchases={gameState.stats.momPurchases}
       />
 
       <div className="relative z-[100]">
         <ProbabilityModal isOpen={showModal} onClose={() => setShowModal(false)} currentChance={currentChance} />
+        <LeaderboardModal 
+            isOpen={showLeaderboard} 
+            onClose={() => setShowLeaderboard(false)} 
+            playerName={gameState.playerName}
+            onRegisterName={registerName}
+            currentStats={gameState.stats ? {
+                purist: gameState.stats.puristWins,
+                prestige: gameState.prestigeLevel,
+                rich: gameState.stats.highestCash,
+                mommy: gameState.stats.momPurchases
+            } : undefined}
+        />
       </div>
 
       <style>{`

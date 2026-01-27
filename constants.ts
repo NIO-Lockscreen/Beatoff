@@ -191,6 +191,21 @@ export const UPGRADES: Record<UpgradeType, UpgradeConfig> = {
     getEffect: (level) => level > 0 ? 10 : 1,
     formatEffect: (val) => `${val}x PERM`,
   },
+  [UpgradeType.PRESTIGE_GOLD_DIGGER]: {
+    id: UpgradeType.PRESTIGE_GOLD_DIGGER,
+    name: "Gold Digger",
+    description: "Absurd wealth scaling for the dedicated.",
+    baseCost: 50,
+    costTiers: [50, 150, 500, 1500, 5000, 25000, 100000, 500000, 2500000, 10000000], // Absurd scaling
+    maxLevel: 10,
+    isPrestige: true,
+    getEffect: (level) => {
+        if (level === 0) return 1;
+        if (level === 1) return 2;
+        return Math.pow(level, 2); // 2x, 4x, 9x, 16x ... 100x
+    },
+    formatEffect: (val) => `${val}x Reward`,
+  },
   [UpgradeType.PRESTIGE_LIMITLESS]: {
     id: UpgradeType.PRESTIGE_LIMITLESS,
     name: "Limitless",
