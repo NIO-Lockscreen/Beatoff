@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { GameState, UpgradeType, WINNING_STREAK, FRAGMENTS_PER_WIN, PlayerStats } from './types';
+import { GameState, UpgradeType, WINNING_STREAK, FRAGMENTS_PER_WIN, PlayerStats, GlobalLeaderboard, LeaderboardEntry } from './types';
 import { UPGRADES } from './constants';
 import Shop from './components/Shop';
 import ProbabilityModal from './components/ProbabilityModal';
@@ -219,62 +219,7 @@ const App: React.FC = () => {
       }
   }, [gameState.money, gameState.stats.highestCash, unlockTitle]);
 
-  // --- Automatic Leaderboard Submission: Purist ---
-  useEffect(() => {
-      if (gameState.playerName && gameState.stats.puristWins > 0) {
-           const finalName = gameState.hasCheated ? "cheater" : gameState.playerName;
-           LeaderboardService.submitScore('purist', {
-               name: finalName,
-               score: gameState.stats.puristWins,
-               date: Date.now(),
-               title: gameState.activeTitle || undefined
-           });
-      }
-  }, [gameState.stats.puristWins, gameState.playerName, gameState.hasCheated, gameState.activeTitle]);
-
-  // --- Automatic Leaderboard Submission: Rich ---
-  useEffect(() => {
-      if (gameState.playerName && gameState.stats.highestCash > 0) {
-           const finalName = gameState.hasCheated ? "cheater" : gameState.playerName;
-           LeaderboardService.submitScore('rich', {
-               name: finalName,
-               score: gameState.stats.highestCash,
-               date: Date.now(),
-               title: gameState.activeTitle || undefined
-           });
-      }
-  }, [gameState.stats.highestCash, gameState.playerName, gameState.hasCheated, gameState.activeTitle]);
-
-  // --- Automatic Leaderboard Submission: Mommy ---
-  useEffect(() => {
-      if (gameState.playerName && gameState.stats.momPurchases > 0) {
-           const finalName = gameState.hasCheated ? "cheater" : gameState.playerName;
-           LeaderboardService.submitScore('mommy', {
-               name: finalName,
-               score: gameState.stats.momPurchases,
-               date: Date.now(),
-               title: gameState.activeTitle || undefined
-           });
-      }
-  }, [gameState.stats.momPurchases, gameState.playerName, gameState.hasCheated, gameState.activeTitle]);
-
-  // --- Automatic Leaderboard Submission: Prestige (On Win) ---
-  useEffect(() => {
-      // If we just won, we have effectively reached the next prestige level
-      // This saves "Prestige + 1" to the leaderboard before the player actually ascends
-      if (hasWon && gameState.playerName) {
-           const finalName = gameState.hasCheated ? "cheater" : gameState.playerName;
-           const effectivePrestige = gameState.prestigeLevel + 1;
-           LeaderboardService.submitScore('prestige', {
-               name: finalName,
-               score: effectivePrestige,
-               date: Date.now(),
-               title: gameState.activeTitle || undefined
-           });
-      }
-  }, [hasWon, gameState.playerName, gameState.prestigeLevel, gameState.hasCheated, gameState.activeTitle]);
-
-
+  
   // --- Actions ---
 
   const handleFlip = useCallback((forceHeads: boolean = false) => {
@@ -339,11 +284,8 @@ const App: React.FC = () => {
                }
            }, 500);
            
-           // PURIST Logic
-           if (prev.isPuristRun) {
-               const newPuristCount = prev.stats.puristWins + 1;
-               // State will be updated, useEffect will trigger submission
-           }
+           // PURIST Logic - handled in state update, but sync handled by effect on hasWon
+           // We just need to ensure stats are updated correctly here
         }
 
         if (isHeads) {
@@ -366,7 +308,7 @@ const App: React.FC = () => {
                 if (newStreak === 9 && prev.maxStreak < 9 && !edgingOwned && !prestigeEdgingOwned) message = "EDGING UNLOCKED";
 
                 setCelebration({ text: message, level: newStreak, id: Date.now() });
-                celebrationTimeoutRef.current = window.setTimeout(() => setCelebration(null), 2500) as unknown as number;
+                celebrationTimeoutRef.current = window.setTimeout(() => setCelebration(null), 2500) as any;
             }
         } else {
              if (currentSpeed > 50) AudioService.playTails();
@@ -402,7 +344,7 @@ const App: React.FC = () => {
 
       setCoinSide(result);
       setIsFlipping(false);
-    }, duration) as unknown as number;
+    }, duration) as any;
 
   }, [isFlipping, hasWon, currentChance, currentSpeed, currentBaseValue, currentCombo, prestigeMultiplier, showMomModal, gameState.streak]);
 
@@ -472,6 +414,19 @@ const App: React.FC = () => {
                     unlockedTitles: nextTitles
                 };
             });
+            
+            // Trigger Leaderboard Update immediately for Mom Purchase
+            // We use the new state values (manually computed since state update is async)
+            if (gameState.playerName) {
+                const name = gameState.hasCheated ? "cheater" : gameState.playerName;
+                const now = Date.now();
+                const title = gameState.activeTitle || undefined;
+                LeaderboardService.submitScores([
+                    { category: 'mommy', entry: { name, score: gameState.stats.momPurchases + 1, date: now, title } },
+                    { category: 'rich', entry: { name, score: gameState.stats.highestCash, date: now, title } }
+                ]);
+            }
+
             triggerMomEvent();
         }
         return;
@@ -577,20 +532,30 @@ const App: React.FC = () => {
           hasCheated: gameState.hasCheated // Cheater status persists across prestige
       };
 
+      // Submit Scores ON ASCEND (New Game Start)
+      if (gameState.playerName) {
+          const name = gameState.hasCheated ? "cheater" : gameState.playerName;
+          const now = Date.now();
+          const title = gameState.activeTitle || undefined;
+
+          const updates: { category: keyof GlobalLeaderboard; entry: LeaderboardEntry }[] = [
+             { category: 'prestige', entry: { name, score: newPrestigeLevel, date: now, title } },
+             { category: 'rich', entry: { name, score: gameState.stats.highestCash, date: now, title } },
+             { category: 'purist', entry: { name, score: gameState.stats.puristWins, date: now, title } },
+             { category: 'mommy', entry: { name, score: gameState.stats.momPurchases, date: now, title } }
+          ];
+
+          // Filter out zero entries if needed (though existing check in LeaderboardService logic mostly handles it, better to be clean)
+          const validUpdates = updates.filter(u => u.entry.score > 0);
+          if (validUpdates.length > 0) {
+              LeaderboardService.submitScores(validUpdates);
+          }
+      }
+
       setGameState(nextState);
       setHasWon(false);
       setCoinSide(null);
       setCelebration(null);
-      
-      // Submit score if registered
-      if (gameState.playerName) {
-          LeaderboardService.submitScore('prestige', {
-             name: gameState.hasCheated ? "cheater" : gameState.playerName,
-             score: newPrestigeLevel,
-             date: Date.now(),
-             title: gameState.activeTitle || undefined
-          });
-      }
   };
 
   const registerName = (name: string) => {
@@ -599,23 +564,30 @@ const App: React.FC = () => {
       
       setGameState(prev => ({ ...prev, playerName: finalName }));
       
-      // Calculate effective prestige (Current + 1 if run is completed/won)
-      // This ensures if a player wins but hasn't clicked "Ascend" yet, the leaderboard reflects their achievement
-      const effectivePrestige = hasWon ? gameState.prestigeLevel + 1 : gameState.prestigeLevel;
+      const updates: { category: keyof GlobalLeaderboard; entry: LeaderboardEntry }[] = [];
+      const now = Date.now();
+      const title = gameState.activeTitle || undefined;
 
-      // Perform initial syncs
-      LeaderboardService.submitScore('rich', { name: finalName, score: gameState.stats.highestCash, date: Date.now(), title: gameState.activeTitle || undefined });
-      
-      if (gameState.stats.puristWins > 0) {
-          LeaderboardService.submitScore('purist', { name: finalName, score: gameState.stats.puristWins, date: Date.now(), title: gameState.activeTitle || undefined });
+      // When registering name, submit everything we have so far
+      // Note: prestigeLevel is current level.
+      if (gameState.stats.highestCash > 0) {
+          updates.push({ category: 'rich', entry: { name: finalName, score: gameState.stats.highestCash, date: now, title }});
       }
       
-      if (effectivePrestige > 0) {
-          LeaderboardService.submitScore('prestige', { name: finalName, score: effectivePrestige, date: Date.now(), title: gameState.activeTitle || undefined });
+      if (gameState.stats.puristWins > 0) {
+          updates.push({ category: 'purist', entry: { name: finalName, score: gameState.stats.puristWins, date: now, title }});
+      }
+      
+      if (gameState.prestigeLevel > 0) {
+          updates.push({ category: 'prestige', entry: { name: finalName, score: gameState.prestigeLevel, date: now, title }});
       }
       
       if (gameState.stats.momPurchases > 0) {
-          LeaderboardService.submitScore('mommy', { name: finalName, score: gameState.stats.momPurchases, date: Date.now(), title: gameState.activeTitle || undefined });
+          updates.push({ category: 'mommy', entry: { name: finalName, score: gameState.stats.momPurchases, date: now, title }});
+      }
+      
+      if (updates.length > 0) {
+          LeaderboardService.submitScores(updates);
       }
   };
 
@@ -624,7 +596,7 @@ const App: React.FC = () => {
         hardReset();
     } else {
         setDeleteConfirm(true);
-        deleteTimeoutRef.current = window.setTimeout(() => setDeleteConfirm(false), 3000) as unknown as number;
+        deleteTimeoutRef.current = window.setTimeout(() => setDeleteConfirm(false), 3000) as any;
     }
   };
 
@@ -642,17 +614,6 @@ const App: React.FC = () => {
       }));
   };
   
-  // Submit Rich score periodically if cash increases
-  useEffect(() => {
-      const timer = window.setInterval(() => {
-          if (gameState.playerName && gameState.money > 0) {
-             const finalName = gameState.hasCheated ? "cheater" : gameState.playerName;
-             LeaderboardService.submitScore('rich', { name: finalName, score: gameState.stats.highestCash, date: Date.now(), title: gameState.activeTitle || undefined });
-          }
-      }, 60000); // Check every minute
-      return () => window.clearInterval(timer as unknown as number);
-  }, [gameState.playerName, gameState.money, gameState.stats.highestCash, gameState.activeTitle, gameState.hasCheated]);
-
   // --- Keyboard Shortcuts ---
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -706,7 +667,7 @@ const App: React.FC = () => {
     const shouldAutoFlip = hasAutoFlip && gameState.autoFlipEnabled && gameState.streak < 10;
     
     if (shouldAutoFlip && !isFlipping && !hasWon && !showMomModal.show) {
-        timer = window.setTimeout(() => handleFlip(false), 300) as unknown as number;
+        timer = window.setTimeout(() => handleFlip(false), 300) as any;
     }
     return () => { if (timer) window.clearTimeout(timer); };
   }, [hasAutoFlip, isFlipping, hasWon, handleFlip, showMomModal, gameState.autoFlipEnabled, gameState.streak]);
@@ -718,7 +679,7 @@ const App: React.FC = () => {
           if (shouldAutoFlip && !isFlipping && !hasWon && !showMomModal.show) {
               handleFlip(false);
           }
-      }, 2000) as unknown as number; 
+      }, 2000) as any; 
       return () => window.clearInterval(failsafeInterval);
   }, [hasAutoFlip, gameState.autoFlipEnabled, gameState.streak, isFlipping, hasWon, showMomModal, handleFlip]);
 
@@ -727,7 +688,7 @@ const App: React.FC = () => {
     return () => {
       if (flipTimeoutRef.current) window.clearTimeout(flipTimeoutRef.current);
       if (celebrationTimeoutRef.current) window.clearTimeout(celebrationTimeoutRef.current);
-      if (deleteTimeoutRef.current) window.clearTimeout(deleteTimeoutRef.current);
+      if (deleteTimeoutRef.current) window.clearTimeout(deleteTimeoutRef.current as number);
     };
   }, []);
 
