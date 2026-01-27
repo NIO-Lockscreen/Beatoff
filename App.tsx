@@ -59,6 +59,7 @@ const INITIAL_STATE: GameState = {
   history: [],
   prestigeLevel: 0,
   voidFragments: 0,
+  autoFlipEnabled: true,
 };
 
 const SAVE_KEY = 'beatTheOdds_save';
@@ -80,6 +81,7 @@ const App: React.FC = () => {
         }
         if (typeof parsed.prestigeLevel === 'undefined') parsed.prestigeLevel = 0;
         if (typeof parsed.voidFragments === 'undefined') parsed.voidFragments = 0;
+        if (typeof parsed.autoFlipEnabled === 'undefined') parsed.autoFlipEnabled = true;
         return parsed;
       }
     } catch (e) {
@@ -147,6 +149,12 @@ const App: React.FC = () => {
   const handleFlip = useCallback((forceHeads: boolean = false) => {
     const isDebug = typeof forceHeads === 'boolean' && forceHeads === true;
 
+    // IMPORTANT: Stop auto flipping if we reached the win condition (streak >= 10)
+    // We check this here to prevent the auto-loop from continuing unnecessarily.
+    if (gameState.streak >= 10 && !forceHeads && !hasWon) {
+        // Just let the last animation finish and trigger win
+    }
+
     if (isFlipping || hasWon || showMomModal.show) return;
 
     setIsFlipping(true);
@@ -172,7 +180,8 @@ const App: React.FC = () => {
         } else {
             // Passive Income Calculation (Standard + Prestige)
             const passiveLevel = prev.upgrades[UpgradeType.PASSIVE_INCOME] || 0;
-            const standardPassive = UPGRADES[UpgradeType.PASSIVE_INCOME].getEffect(passiveLevel);
+            // Buffed Standard Passive Income: Scaled by Prestige Level
+            const standardPassive = UPGRADES[UpgradeType.PASSIVE_INCOME].getEffect(passiveLevel) * (1 + prev.prestigeLevel);
             
             const voidPassiveLevel = prev.upgrades[UpgradeType.PRESTIGE_PASSIVE] || 0;
             const voidPassive = UPGRADES[UpgradeType.PRESTIGE_PASSIVE].getEffect(voidPassiveLevel);
@@ -208,14 +217,18 @@ const App: React.FC = () => {
                 if (celebrationTimeoutRef.current) window.clearTimeout(celebrationTimeoutRef.current);
                 
                 let message = CELEBRATION_MESSAGES[Math.min(newStreak, CELEBRATION_MESSAGES.length - 1)] || "GODLIKE";
+                if (newStreak > 10) message = "OVERACHIEVER";
                 
                 const autoFlipOwned = (prev.upgrades[UpgradeType.AUTO_FLIP] || 0) > 0 || (prev.upgrades[UpgradeType.PRESTIGE_AUTO] || 0) > 0;
                 const passiveOwned = (prev.upgrades[UpgradeType.PASSIVE_INCOME] || 0) > 0 || (prev.upgrades[UpgradeType.PRESTIGE_PASSIVE] || 0) > 0;
                 const edgingOwned = (prev.upgrades[UpgradeType.EDGING] || 0) > 0 || (prev.upgrades[UpgradeType.PRESTIGE_EDGING] || 0) > 0;
+                const prestigeAutoOwned = (prev.upgrades[UpgradeType.PRESTIGE_AUTO] || 0) > 0;
+                const prestigeEdgingOwned = (prev.upgrades[UpgradeType.PRESTIGE_EDGING] || 0) > 0;
 
                 if (newStreak === 3 && prev.maxStreak < 3 && !passiveOwned) message = "PASSIVE INCOME UNLOCKED";
-                if (newStreak === 5 && prev.maxStreak < 5 && !autoFlipOwned) message = "AUTO FLIP UNLOCKED";
-                if (newStreak === 9 && prev.maxStreak < 9 && !edgingOwned) message = "EDGING UNLOCKED";
+                // Hide reward messages if prestige version is owned
+                if (newStreak === 5 && prev.maxStreak < 5 && !autoFlipOwned && !prestigeAutoOwned) message = "AUTO FLIP UNLOCKED";
+                if (newStreak === 9 && prev.maxStreak < 9 && !edgingOwned && !prestigeEdgingOwned) message = "EDGING UNLOCKED";
 
                 setCelebration({ text: message, level: newStreak, id: Date.now() });
                 celebrationTimeoutRef.current = window.setTimeout(() => setCelebration(null), 2500);
@@ -238,7 +251,7 @@ const App: React.FC = () => {
       setIsFlipping(false);
     }, duration);
 
-  }, [isFlipping, hasWon, currentChance, currentSpeed, currentBaseValue, currentCombo, prestigeMultiplier, showMomModal]);
+  }, [isFlipping, hasWon, currentChance, currentSpeed, currentBaseValue, currentCombo, prestigeMultiplier, showMomModal, gameState.streak]);
 
   const triggerMomEvent = () => {
       // Get seen list
@@ -400,6 +413,13 @@ const App: React.FC = () => {
       const newMuted = AudioService.toggleMute();
       setMuted(newMuted);
   };
+  
+  const toggleAutoFlip = () => {
+      setGameState(prev => ({
+          ...prev,
+          autoFlipEnabled: !prev.autoFlipEnabled
+      }));
+  };
 
   // --- Keyboard Shortcuts ---
   useEffect(() => {
@@ -440,11 +460,27 @@ const App: React.FC = () => {
   // --- Auto Flip Effect ---
   useEffect(() => {
     let timer: number;
-    if (hasAutoFlip && !isFlipping && !hasWon && !showMomModal.show) {
+    // Check if auto flip is active AND enabled AND streak < 10
+    const shouldAutoFlip = hasAutoFlip && gameState.autoFlipEnabled && gameState.streak < 10;
+    
+    if (shouldAutoFlip && !isFlipping && !hasWon && !showMomModal.show) {
         timer = window.setTimeout(() => handleFlip(false), 300);
     }
     return () => { if (timer) window.clearTimeout(timer); };
-  }, [hasAutoFlip, isFlipping, hasWon, handleFlip, showMomModal]);
+  }, [hasAutoFlip, isFlipping, hasWon, handleFlip, showMomModal, gameState.autoFlipEnabled, gameState.streak]);
+
+  // --- Auto Flip Failsafe ---
+  // If the game state thinks it should be auto-flipping but isn't, kickstart it.
+  useEffect(() => {
+      const failsafeInterval = setInterval(() => {
+          const shouldAutoFlip = hasAutoFlip && gameState.autoFlipEnabled && gameState.streak < 10;
+          if (shouldAutoFlip && !isFlipping && !hasWon && !showMomModal.show) {
+              // If we are here, the main loop might have stalled.
+              handleFlip(false);
+          }
+      }, 2000); // Check every 2 seconds
+      return () => clearInterval(failsafeInterval);
+  }, [hasAutoFlip, gameState.autoFlipEnabled, gameState.streak, isFlipping, hasWon, showMomModal, handleFlip]);
 
 
   useEffect(() => {
@@ -682,6 +718,8 @@ const App: React.FC = () => {
         upgrades={gameState.upgrades} 
         onBuy={buyUpgrade}
         maxStreak={gameState.maxStreak}
+        autoFlipEnabled={gameState.autoFlipEnabled}
+        onToggleAutoFlip={toggleAutoFlip}
       />
 
       <div className="relative z-[100]">

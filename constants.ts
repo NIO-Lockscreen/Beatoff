@@ -142,8 +142,8 @@ export const UPGRADES: Record<UpgradeType, UpgradeConfig> = {
     costTiers: [5, 10, 15, 25, 50],
     maxLevel: 5,
     isPrestige: true,
-    getEffect: (level) => level * 0.01, 
-    formatEffect: (val) => `+${(val*100).toFixed(0)}% Base`,
+    getEffect: (level) => level * 0.025, // BUFFED from 0.01 to 0.025
+    formatEffect: (val) => `+${(val*100).toFixed(1)}% Base`,
   },
   [UpgradeType.PRESTIGE_FLUX]: {
     id: UpgradeType.PRESTIGE_FLUX,
@@ -153,7 +153,7 @@ export const UPGRADES: Record<UpgradeType, UpgradeConfig> = {
     costTiers: [3, 6, 9, 12, 15],
     maxLevel: 5,
     isPrestige: true,
-    getEffect: (level) => level * 100,
+    getEffect: (level) => level * 250, // BUFFED from 100 to 250
     formatEffect: (val) => `-${val}ms`,
   },
   
@@ -206,8 +206,8 @@ export const UPGRADES: Record<UpgradeType, UpgradeConfig> = {
     id: UpgradeType.PRESTIGE_MOM,
     name: "Your Mom",
     description: "???",
-    baseCost: 10000,
-    costTiers: [10000],
+    baseCost: 1000000, // COST INCREASED
+    costTiers: [1000000],
     maxLevel: 1,
     // Note: isPrestige is false so it costs Money ($), but we will render it in Void shop manually
     isPrestige: false, 

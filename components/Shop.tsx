@@ -1,7 +1,7 @@
 import React from 'react';
 import { UpgradeType } from '../types';
 import { UPGRADES } from '../constants';
-import { Zap, TrendingUp, Clock, Coins, PlayCircle, ShieldCheck, Flame, Ghost, Sparkles, Hourglass, Infinity, Skull, Crown, Heart } from 'lucide-react';
+import { Zap, TrendingUp, Clock, Coins, PlayCircle, ShieldCheck, Flame, Ghost, Sparkles, Hourglass, Infinity, Skull, Crown, Heart, Power } from 'lucide-react';
 
 interface ShopProps {
   money: number;
@@ -10,6 +10,8 @@ interface ShopProps {
   upgrades: Record<UpgradeType, number>;
   onBuy: (type: UpgradeType, cost: number, isPrestige: boolean) => void;
   maxStreak: number;
+  autoFlipEnabled: boolean;
+  onToggleAutoFlip: () => void;
 }
 
 const ICONS = {
@@ -31,9 +33,10 @@ const ICONS = {
   [UpgradeType.PRESTIGE_MOM]: Heart,
 };
 
-const Shop: React.FC<ShopProps> = ({ money, voidFragments, prestigeLevel, upgrades, onBuy, maxStreak }) => {
+const Shop: React.FC<ShopProps> = ({ money, voidFragments, prestigeLevel, upgrades, onBuy, maxStreak, autoFlipEnabled, onToggleAutoFlip }) => {
   
   const hasLimitless = (upgrades[UpgradeType.PRESTIGE_LIMITLESS] || 0) > 0;
+  const hasPrestigeEdging = (upgrades[UpgradeType.PRESTIGE_EDGING] || 0) > 0;
 
   const renderUpgrade = (upgradeId: UpgradeType) => {
     const upgrade = UPGRADES[upgradeId];
@@ -47,6 +50,8 @@ const Shop: React.FC<ShopProps> = ({ money, voidFragments, prestigeLevel, upgrad
         if (!owned && maxStreak < 5) return null;
     }
     if (upgrade.id === UpgradeType.EDGING) {
+        // Hide standard Edging if Prestige Edging is owned
+        if (hasPrestigeEdging) return null;
         const owned = (upgrades[upgrade.id] || 0) > 0;
         if (!owned && maxStreak < 9) return null;
     }
@@ -80,14 +85,31 @@ const Shop: React.FC<ShopProps> = ({ money, voidFragments, prestigeLevel, upgrad
     const canAfford = !isMaxed && currency >= cost;
     
     const Icon = ICONS[upgrade.id] || Zap;
-    const currentEffect = upgrade.formatEffect(upgrade.getEffect(currentLevel));
+    
+    // Calculate display effect (incorporating Prestige Buffs)
+    let rawEffect = upgrade.getEffect(currentLevel);
+    
+    // Buff Passive Income display
+    if (upgrade.id === UpgradeType.PASSIVE_INCOME) {
+        rawEffect = rawEffect * (1 + prestigeLevel);
+    }
+    
+    const currentEffect = upgrade.formatEffect(rawEffect);
     
     // Next effect preview
-    const nextEffectRaw = upgrade.getEffect(currentLevel + 1);
+    let nextEffectRaw = upgrade.getEffect(currentLevel + 1);
+    // Buff Passive Income next preview
+    if (upgrade.id === UpgradeType.PASSIVE_INCOME) {
+        nextEffectRaw = nextEffectRaw * (1 + prestigeLevel);
+    }
     const nextEffect = !isMaxed ? upgrade.formatEffect(nextEffectRaw) : 'MAX';
 
     // Highlight Mom item
     const isMom = upgrade.id === UpgradeType.PRESTIGE_MOM;
+
+    // Check if this is an Auto Flip upgrade that is owned (for Toggle)
+    const isAutoFlipType = (upgrade.id === UpgradeType.AUTO_FLIP || upgrade.id === UpgradeType.PRESTIGE_AUTO);
+    const showToggle = isAutoFlipType && currentLevel > 0;
 
     return (
       <div key={upgrade.id} className={`
@@ -129,28 +151,47 @@ const Shop: React.FC<ShopProps> = ({ money, voidFragments, prestigeLevel, upgrad
             <span className="text-noir-600">→</span>
             <span className={isMaxed ? 'text-amber-500' : 'text-white'}>{nextEffect}</span>
         </div>
+        
+        <div className="flex gap-2 relative z-10">
+            {showToggle && (
+                <button
+                    onClick={onToggleAutoFlip}
+                    className={`
+                        flex-1 py-2 px-3 font-mono text-sm font-bold border transition-colors flex items-center justify-center gap-2
+                        ${autoFlipEnabled 
+                            ? 'border-amber-500 text-amber-500 bg-amber-900/20 hover:bg-amber-900/40' 
+                            : 'border-noir-600 text-noir-500 bg-black hover:border-noir-400 hover:text-noir-400'
+                        }
+                    `}
+                    title={autoFlipEnabled ? "Disable Auto Flip" : "Enable Auto Flip"}
+                >
+                    <Power size={14} />
+                    {autoFlipEnabled ? "ON" : "OFF"}
+                </button>
+            )}
 
-        <button
-          onClick={() => onBuy(upgrade.id, cost, isPrestige)}
-          disabled={!canAfford || isMaxed}
-          className={`
-            w-full py-2 px-3 font-mono text-sm font-bold border transition-all duration-100 relative z-10
-            ${isMaxed 
-              ? 'border-transparent text-noir-600 cursor-not-allowed bg-black/20' 
-              : canAfford
-                ? isPrestige 
-                    ? 'border-purple-500 text-purple-100 hover:bg-purple-900/50 hover:border-purple-300 hover:shadow-[0_0_10px_rgba(168,85,247,0.2)] active:translate-y-0.5'
-                    : isMom
-                         ? 'border-pink-500 text-pink-100 hover:bg-pink-900/50 hover:border-pink-300 hover:shadow-[0_0_10px_rgba(236,72,153,0.2)] active:translate-y-0.5'
-                         : 'border-noir-600 text-white hover:bg-noir-800 hover:border-white active:translate-y-0.5'
-                : isPrestige 
-                    ? 'border-purple-900/30 text-purple-700 cursor-not-allowed bg-black/20'
-                    : 'border-noir-800 text-noir-600 cursor-not-allowed bg-noir-950/50'
-            }
-          `}
-        >
-          {isMaxed ? 'MAXED' : `${isPrestige ? '🟣 ' : '$'}${cost.toLocaleString()}`}
-        </button>
+            <button
+            onClick={() => onBuy(upgrade.id, cost, isPrestige)}
+            disabled={!canAfford || isMaxed}
+            className={`
+                flex-[2] py-2 px-3 font-mono text-sm font-bold border transition-all duration-100
+                ${isMaxed 
+                ? 'border-transparent text-noir-600 cursor-not-allowed bg-black/20' 
+                : canAfford
+                    ? isPrestige 
+                        ? 'border-purple-500 text-purple-100 hover:bg-purple-900/50 hover:border-purple-300 hover:shadow-[0_0_10px_rgba(168,85,247,0.2)] active:translate-y-0.5'
+                        : isMom
+                            ? 'border-pink-500 text-pink-100 hover:bg-pink-900/50 hover:border-pink-300 hover:shadow-[0_0_10px_rgba(236,72,153,0.2)] active:translate-y-0.5'
+                            : 'border-noir-600 text-white hover:bg-noir-800 hover:border-white active:translate-y-0.5'
+                    : isPrestige 
+                        ? 'border-purple-900/30 text-purple-700 cursor-not-allowed bg-black/20'
+                        : 'border-noir-800 text-noir-600 cursor-not-allowed bg-noir-950/50'
+                }
+            `}
+            >
+            {isMaxed ? 'MAXED' : `${isPrestige ? '🟣 ' : '$'}${cost.toLocaleString()}`}
+            </button>
+        </div>
       </div>
     );
   };

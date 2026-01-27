@@ -47,6 +47,7 @@ export interface GameState {
   // Prestige Data
   prestigeLevel: number; // Multiplier for global income
   voidFragments: number; // Currency for prestige shop
+  autoFlipEnabled: boolean; // Toggle for auto flippers
 }
 
 export const WINNING_STREAK = 10;
