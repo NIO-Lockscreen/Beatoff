@@ -1,7 +1,7 @@
-import React from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { UpgradeType } from '../types';
 import { UPGRADES } from '../constants';
-import { Zap, TrendingUp, Clock, Coins, PlayCircle, ShieldCheck, Flame, Ghost, Sparkles, Hourglass, Infinity, Skull, Crown, Heart, Power } from 'lucide-react';
+import { Zap, TrendingUp, Clock, Coins, PlayCircle, ShieldCheck, Flame, Ghost, Sparkles, Hourglass, Infinity, Skull, Crown, Heart, Power, ChevronDown } from 'lucide-react';
 
 interface ShopProps {
   money: number;
@@ -12,6 +12,8 @@ interface ShopProps {
   maxStreak: number;
   autoFlipEnabled: boolean;
   onToggleAutoFlip: () => void;
+  seenUpgrades: UpgradeType[];
+  onSeen: (id: UpgradeType) => void;
 }
 
 const ICONS = {
@@ -33,39 +35,103 @@ const ICONS = {
   [UpgradeType.PRESTIGE_MOM]: Heart,
 };
 
-const Shop: React.FC<ShopProps> = ({ money, voidFragments, prestigeLevel, upgrades, onBuy, maxStreak, autoFlipEnabled, onToggleAutoFlip }) => {
+const Shop: React.FC<ShopProps> = ({ 
+  money, 
+  voidFragments, 
+  prestigeLevel, 
+  upgrades, 
+  onBuy, 
+  maxStreak, 
+  autoFlipEnabled, 
+  onToggleAutoFlip,
+  seenUpgrades,
+  onSeen
+}) => {
   
   const hasLimitless = (upgrades[UpgradeType.PRESTIGE_LIMITLESS] || 0) > 0;
   const hasPrestigeEdging = (upgrades[UpgradeType.PRESTIGE_EDGING] || 0) > 0;
+  
+  const [hasUnseenItems, setHasUnseenItems] = useState(false);
+  const observerRef = useRef<IntersectionObserver | null>(null);
+
+  // Helper to determine if an upgrade is currently visible (unlocked)
+  const isUnlocked = useCallback((upgradeId: UpgradeType): boolean => {
+    const upgrade = UPGRADES[upgradeId];
+    
+    // 1. Base Prestige Check: If we haven't prestiged, NO prestige items should be unlocked/visible
+    if ((upgrade.isPrestige || upgrade.id === UpgradeType.PRESTIGE_MOM) && prestigeLevel === 0) {
+        return false;
+    }
+
+    // 2. Specific Prestige Tier Checks
+    if (upgradeId === UpgradeType.PRESTIGE_PASSIVE && prestigeLevel < 2) return false;
+    if (upgradeId === UpgradeType.PRESTIGE_AUTO && prestigeLevel < 3) return false;
+    if (upgradeId === UpgradeType.PRESTIGE_EDGING && prestigeLevel < 5) return false;
+    if (upgradeId === UpgradeType.PRESTIGE_LIMITLESS && prestigeLevel < 10) return false;
+    if (upgradeId === UpgradeType.PRESTIGE_MOM && prestigeLevel < 15) return false;
+
+    // 3. Standard Upgrade Checks
+    if (upgradeId === UpgradeType.PASSIVE_INCOME) {
+        const owned = (upgrades[upgradeId] || 0) > 0;
+        if (!owned && maxStreak < 3) return false;
+    }
+    if (upgradeId === UpgradeType.AUTO_FLIP) {
+        const owned = (upgrades[upgradeId] || 0) > 0;
+        if (!owned && maxStreak < 5) return false;
+    }
+    if (upgradeId === UpgradeType.EDGING) {
+        if (hasPrestigeEdging) return false; // Hide standard edging if prestige owned
+        const owned = (upgrades[upgradeId] || 0) > 0;
+        if (!owned && maxStreak < 9) return false;
+    }
+    
+    return true;
+  }, [maxStreak, prestigeLevel, upgrades, hasPrestigeEdging]);
+
+  // Determine which items are currently unlocked but not yet seen
+  useEffect(() => {
+    const allUpgrades = Object.values(UPGRADES);
+    const unlocked = allUpgrades.filter(u => isUnlocked(u.id));
+    const unseen = unlocked.filter(u => !seenUpgrades.includes(u.id));
+    
+    setHasUnseenItems(unseen.length > 0);
+  }, [isUnlocked, seenUpgrades]);
+
+
+  // Setup IntersectionObserver
+  useEffect(() => {
+    // Cleanup old observer
+    if (observerRef.current) {
+        observerRef.current.disconnect();
+    }
+
+    observerRef.current = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+            if (entry.isIntersecting) {
+                const id = entry.target.getAttribute('data-upgrade-id') as UpgradeType;
+                if (id) {
+                    onSeen(id);
+                }
+            }
+        });
+    }, {
+        threshold: 0.5 // 50% visible triggers "seen"
+    });
+
+    // Attach to current DOM elements that are unseen
+    const unseenElements = document.querySelectorAll('.unseen-upgrade');
+    unseenElements.forEach(el => observerRef.current?.observe(el));
+
+    return () => observerRef.current?.disconnect();
+  }, [seenUpgrades, onSeen, hasUnseenItems]); // Re-run when seen list changes to update observers
+
 
   const renderUpgrade = (upgradeId: UpgradeType) => {
-    const upgrade = UPGRADES[upgradeId];
-    // Visibility checks for Standard Upgrades
-    if (upgrade.id === UpgradeType.PASSIVE_INCOME) {
-        const owned = (upgrades[upgrade.id] || 0) > 0;
-        if (!owned && maxStreak < 3) return null;
-    }
-    if (upgrade.id === UpgradeType.AUTO_FLIP) {
-        const owned = (upgrades[upgrade.id] || 0) > 0;
-        if (!owned && maxStreak < 5) return null;
-    }
-    if (upgrade.id === UpgradeType.EDGING) {
-        // Hide standard Edging if Prestige Edging is owned
-        if (hasPrestigeEdging) return null;
-        const owned = (upgrades[upgrade.id] || 0) > 0;
-        if (!owned && maxStreak < 9) return null;
-    }
-    
-    // Visibility checks for Prestige Upgrades
-    if (upgrade.id === UpgradeType.PRESTIGE_PASSIVE && prestigeLevel < 2) return null;
-    if (upgrade.id === UpgradeType.PRESTIGE_AUTO && prestigeLevel < 3) return null;
-    if (upgrade.id === UpgradeType.PRESTIGE_EDGING && prestigeLevel < 5) return null;
-    if (upgrade.id === UpgradeType.PRESTIGE_LIMITLESS && prestigeLevel < 10) return null;
-    if (upgrade.id === UpgradeType.PRESTIGE_MOM && prestigeLevel < 15) return null;
+    // Use isUnlocked to ensure consistency with the indicator logic
+    if (!isUnlocked(upgradeId)) return null;
 
+    const upgrade = UPGRADES[upgradeId];
     const currentLevel = upgrades[upgrade.id] || 0;
-    
-    // Determine the effective max level
     const effectiveMaxLevel = (hasLimitless && upgrade.limitlessMaxLevel) 
         ? upgrade.limitlessMaxLevel 
         : upgrade.maxLevel;
@@ -73,55 +139,49 @@ const Shop: React.FC<ShopProps> = ({ money, voidFragments, prestigeLevel, upgrad
     const isMaxed = currentLevel >= effectiveMaxLevel;
     
     let cost = isMaxed ? 0 : (upgrade.costTiers[currentLevel] || upgrade.costTiers[upgrade.costTiers.length - 1]);
-    
     const isPrestige = upgrade.isPrestige || false;
     
-    // Cap Void Fragment costs at 50
-    if (isPrestige && cost > 50) {
-        cost = 50;
-    }
+    if (isPrestige && cost > 50) cost = 50;
 
     const currency = isPrestige ? voidFragments : money;
     const canAfford = !isMaxed && currency >= cost;
     
     const Icon = ICONS[upgrade.id] || Zap;
     
-    // Calculate display effect (incorporating Prestige Buffs)
     let rawEffect = upgrade.getEffect(currentLevel);
-    
-    // Buff Passive Income display
     if (upgrade.id === UpgradeType.PASSIVE_INCOME) {
         rawEffect = rawEffect * (1 + prestigeLevel);
     }
-    
     const currentEffect = upgrade.formatEffect(rawEffect);
     
-    // Next effect preview
     let nextEffectRaw = upgrade.getEffect(currentLevel + 1);
-    // Buff Passive Income next preview
     if (upgrade.id === UpgradeType.PASSIVE_INCOME) {
         nextEffectRaw = nextEffectRaw * (1 + prestigeLevel);
     }
     const nextEffect = !isMaxed ? upgrade.formatEffect(nextEffectRaw) : 'MAX';
 
-    // Highlight Mom item
     const isMom = upgrade.id === UpgradeType.PRESTIGE_MOM;
-
-    // Check if this is an Auto Flip upgrade that is owned (for Toggle)
     const isAutoFlipType = (upgrade.id === UpgradeType.AUTO_FLIP || upgrade.id === UpgradeType.PRESTIGE_AUTO);
     const showToggle = isAutoFlipType && currentLevel > 0;
+    
+    const isUnseen = !seenUpgrades.includes(upgrade.id);
 
     return (
-      <div key={upgrade.id} className={`
-        border p-3 group transition-colors animate-fade-in relative overflow-hidden
-        ${isPrestige 
-            ? 'bg-purple-950/20 border-purple-900/50 hover:border-purple-500/50' 
-            : isMom 
-                ? 'bg-pink-950/20 border-pink-900/50 hover:border-pink-500/50'
-                : 'bg-noir-950 border-noir-800 hover:border-noir-600'
-        }
-        ${upgrade.id === UpgradeType.PRESTIGE_LIMITLESS ? 'border-amber-500/50 bg-amber-900/10' : ''}
-      `}>
+      <div 
+        key={upgrade.id} 
+        data-upgrade-id={upgrade.id}
+        className={`
+            border p-3 group transition-colors animate-fade-in relative overflow-hidden
+            ${isPrestige 
+                ? 'bg-purple-950/20 border-purple-900/50 hover:border-purple-500/50' 
+                : isMom 
+                    ? 'bg-pink-950/20 border-pink-900/50 hover:border-pink-500/50'
+                    : 'bg-noir-950 border-noir-800 hover:border-noir-600'
+            }
+            ${upgrade.id === UpgradeType.PRESTIGE_LIMITLESS ? 'border-amber-500/50 bg-amber-900/10' : ''}
+            ${isUnseen ? 'unseen-upgrade' : ''}
+        `}
+      >
         {isPrestige && (
             <div className="absolute -right-4 -top-4 w-12 h-12 bg-purple-500/10 blur-xl rounded-full pointer-events-none"></div>
         )}
@@ -132,6 +192,11 @@ const Shop: React.FC<ShopProps> = ({ money, voidFragments, prestigeLevel, upgrad
         
         {isMom && (
              <div className="absolute inset-0 bg-gradient-to-tr from-pink-500/10 via-transparent to-transparent pointer-events-none"></div>
+        )}
+
+        {/* Unseen Highlight */}
+        {isUnseen && (
+             <div className="absolute top-0 right-0 w-2 h-2 bg-amber-500 rounded-bl shadow-[0_0_8px_rgba(245,158,11,0.8)] animate-pulse z-20"></div>
         )}
 
         <div className="flex justify-between items-start mb-2 relative z-10">
@@ -211,7 +276,7 @@ const Shop: React.FC<ShopProps> = ({ money, voidFragments, prestigeLevel, upgrad
         )}
       </div>
 
-      <div className="flex-1 p-4 space-y-4 md:overflow-y-auto overflow-visible scrollbar-thin scrollbar-thumb-noir-700 scrollbar-track-transparent">
+      <div className="flex-1 p-4 space-y-4 md:overflow-y-auto overflow-visible scrollbar-thin scrollbar-thumb-noir-700 scrollbar-track-transparent pb-16">
         {/* Standard Upgrades - Filter out MOM explicitly */}
         <div className="space-y-4">
              {Object.values(UPGRADES)
@@ -234,6 +299,18 @@ const Shop: React.FC<ShopProps> = ({ money, voidFragments, prestigeLevel, upgrad
             </div>
         )}
       </div>
+
+      {/* NEW ITEMS INDICATOR */}
+      {hasUnseenItems && (
+          <div className="fixed md:absolute bottom-6 left-1/2 md:left-1/2 -translate-x-1/2 z-[60] animate-bounce pointer-events-none">
+              <div className="flex flex-col items-center">
+                  <div className="px-4 py-2 bg-amber-500 text-black font-mono font-bold text-xs tracking-widest rounded shadow-lg shadow-amber-500/20 border border-amber-400">
+                      NEW UPGRADES
+                  </div>
+                  <div className="w-0 h-0 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-t-[8px] border-t-amber-500 mt-[-1px]"></div>
+              </div>
+          </div>
+      )}
     </div>
   );
 };

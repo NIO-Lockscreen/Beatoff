@@ -25,7 +25,7 @@ const COLORS = [
 const ConfettiSystem: React.FC<ConfettiSystemProps> = ({ streak }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const particles = useRef<Particle[]>([]);
-  const animationId = useRef<number>();
+  const animationId = useRef<number | null>(null);
   const prevStreak = useRef(streak);
 
   // Animation Loop

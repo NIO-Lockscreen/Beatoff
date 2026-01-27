@@ -17,7 +17,7 @@ const CELEBRATION_MESSAGES = [
   "SYSTEM ERROR", 
   "IMPOSSIBLE", 
   "DESTINY", 
-  "ONE MORE"
+  "Winner!!!"
 ];
 
 const COMPLIMENTS = [
@@ -60,6 +60,7 @@ const INITIAL_STATE: GameState = {
   prestigeLevel: 0,
   voidFragments: 0,
   autoFlipEnabled: true,
+  seenUpgrades: [UpgradeType.CHANCE, UpgradeType.SPEED, UpgradeType.COMBO, UpgradeType.VALUE], // Base items always seen
 };
 
 const SAVE_KEY = 'beatTheOdds_save';
@@ -82,6 +83,19 @@ const App: React.FC = () => {
         if (typeof parsed.prestigeLevel === 'undefined') parsed.prestigeLevel = 0;
         if (typeof parsed.voidFragments === 'undefined') parsed.voidFragments = 0;
         if (typeof parsed.autoFlipEnabled === 'undefined') parsed.autoFlipEnabled = true;
+        
+        // Initialize seenUpgrades for legacy saves
+        if (!parsed.seenUpgrades) {
+            parsed.seenUpgrades = [UpgradeType.CHANCE, UpgradeType.SPEED, UpgradeType.COMBO, UpgradeType.VALUE];
+            // If user already owns something, mark it as seen so it doesn't blink
+            Object.keys(parsed.upgrades).forEach((key) => {
+                const k = key as UpgradeType;
+                if (parsed.upgrades[k] > 0 && !parsed.seenUpgrades.includes(k)) {
+                    parsed.seenUpgrades.push(k);
+                }
+            });
+        }
+        
         return parsed;
       }
     } catch (e) {
@@ -353,6 +367,17 @@ const App: React.FC = () => {
         }
     }
   };
+  
+  // Callback when a user sees a new upgrade
+  const handleUpgradeSeen = useCallback((id: UpgradeType) => {
+      setGameState(prev => {
+          if (prev.seenUpgrades.includes(id)) return prev;
+          return {
+              ...prev,
+              seenUpgrades: [...prev.seenUpgrades, id]
+          };
+      });
+  }, []);
 
   // HARD RESET (Delete Save)
   const hardReset = () => {
@@ -392,6 +417,8 @@ const App: React.FC = () => {
           voidFragments: gameState.voidFragments + voidReward,
           upgrades: prestigeUpgrades as Record<UpgradeType, number>,
           totalFlips: 0, 
+          // Preserve seen upgrades so they don't blink again on new run
+          seenUpgrades: gameState.seenUpgrades
       };
 
       setGameState(nextState);
@@ -720,6 +747,8 @@ const App: React.FC = () => {
         maxStreak={gameState.maxStreak}
         autoFlipEnabled={gameState.autoFlipEnabled}
         onToggleAutoFlip={toggleAutoFlip}
+        seenUpgrades={gameState.seenUpgrades}
+        onSeen={handleUpgradeSeen}
       />
 
       <div className="relative z-[100]">
