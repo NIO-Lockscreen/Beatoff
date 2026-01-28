@@ -438,7 +438,7 @@ const App: React.FC = () => {
                 if (newStreak === 9 && prev.maxStreak < 9 && !edgingOwned && !prestigeEdgingOwned) message = "EDGING UNLOCKED";
 
                 setCelebration({ text: message, level: newStreak, id: Date.now() });
-                celebrationTimeoutRef.current = window.setTimeout(() => setCelebration(null), 2500) as any;
+                celebrationTimeoutRef.current = window.setTimeout(() => setCelebration(null), 2500) as unknown as number;
             }
         } else {
              if (currentSpeed > 50) AudioService.playTails();
@@ -460,7 +460,7 @@ const App: React.FC = () => {
 
       setCoinSide(result);
       setIsFlipping(false);
-    }, duration) as any;
+    }, duration) as unknown as number;
 
   }, [isFlipping, hasWon, currentChance, currentSpeed, currentBaseValue, currentCombo, prestigeMultiplier, showMomModal, gameState.streak]);
 
@@ -773,7 +773,7 @@ const App: React.FC = () => {
         hardReset();
     } else {
         setDeleteConfirm(true);
-        deleteTimeoutRef.current = window.setTimeout(() => setDeleteConfirm(false), 3000) as any;
+        deleteTimeoutRef.current = window.setTimeout(() => setDeleteConfirm(false), 3000) as unknown as number;
     }
   };
 
@@ -827,7 +827,7 @@ const App: React.FC = () => {
 
         // HIDDEN CODE: ZEX (+5 Prestige)
         if (e.key) {
-           cheatCodeBuffer.current = (cheatCodeBuffer.current + (e.key as string)).toUpperCase().slice(-3);
+           cheatCodeBuffer.current = (cheatCodeBuffer.current + e.key).toUpperCase().slice(-3);
            if (cheatCodeBuffer.current === "ZEX") {
                setGameState((prev: GameState) => ({
                    ...prev,
@@ -850,7 +850,7 @@ const App: React.FC = () => {
     
     if (shouldAutoFlip && !isFlipping && !hasWon && !showMomModal.show) {
         // CALL handleFlip with isAuto = true
-        timer = window.setTimeout(() => handleFlip(false, true), 300) as any;
+        timer = window.setTimeout(() => handleFlip(false, true), 300) as unknown as number;
     }
     return () => { if (timer) window.clearTimeout(timer); };
   }, [hasAutoFlip, isFlipping, hasWon, handleFlip, showMomModal, gameState.autoFlipEnabled, gameState.streak]);
@@ -863,7 +863,7 @@ const App: React.FC = () => {
               // CALL handleFlip with isAuto = true
               handleFlip(false, true);
           }
-      }, 2000) as any; 
+      }, 2000) as unknown as number; 
       return () => window.clearInterval(failsafeInterval);
   }, [hasAutoFlip, gameState.autoFlipEnabled, gameState.streak, isFlipping, hasWon, showMomModal, handleFlip]);
 
