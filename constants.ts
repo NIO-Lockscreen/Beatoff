@@ -1,5 +1,20 @@
 import { UpgradeType, UpgradeConfig } from './types';
 
+const formatLargeNumber = (val: number): string => {
+    if (val >= 1e33) return '$' + (val / 1e33).toFixed(1).replace(/\.0$/, '') + 'Dc';
+    if (val >= 1e30) return '$' + (val / 1e30).toFixed(1).replace(/\.0$/, '') + 'No';
+    if (val >= 1e27) return '$' + (val / 1e27).toFixed(1).replace(/\.0$/, '') + 'Oc';
+    if (val >= 1e24) return '$' + (val / 1e24).toFixed(1).replace(/\.0$/, '') + 'Sp';
+    if (val >= 1e21) return '$' + (val / 1e21).toFixed(1).replace(/\.0$/, '') + 'Sx';
+    if (val >= 1e18) return '$' + (val / 1e18).toFixed(1).replace(/\.0$/, '') + 'Qi';
+    if (val >= 1e15) return '$' + (val / 1e15).toFixed(1).replace(/\.0$/, '') + 'Qa';
+    if (val >= 1e12) return '$' + (val / 1e12).toFixed(1).replace(/\.0$/, '') + 'T';
+    if (val >= 1e9) return '$' + (val / 1e9).toFixed(1).replace(/\.0$/, '') + 'B';
+    if (val >= 1e6) return '$' + (val / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
+    if (val >= 1e3) return '$' + (val / 1e3).toFixed(1).replace(/\.0$/, '') + 'k';
+    return '$' + val.toLocaleString();
+}
+
 export const UPGRADES: Record<UpgradeType, UpgradeConfig> = {
   // --- Standard Upgrades ---
   [UpgradeType.CHANCE]: {
@@ -81,7 +96,7 @@ export const UPGRADES: Record<UpgradeType, UpgradeConfig> = {
       // Massive jumps
       return values[values.length - 1] * Math.pow(10, level - 5);
     },
-    formatEffect: (val) => `$${val.toLocaleString()}`,
+    formatEffect: (val) => formatLargeNumber(val),
   },
   [UpgradeType.PASSIVE_INCOME]: {
     id: UpgradeType.PASSIVE_INCOME,
@@ -99,7 +114,7 @@ export const UPGRADES: Record<UpgradeType, UpgradeConfig> = {
         if (level <= 6) return level;
         return level * Math.pow(5, level - 6);
     },
-    formatEffect: (val) => `$${val.toLocaleString()}`,
+    formatEffect: (val) => formatLargeNumber(val),
   },
   [UpgradeType.AUTO_FLIP]: {
     id: UpgradeType.AUTO_FLIP,

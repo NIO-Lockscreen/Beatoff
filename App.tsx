@@ -241,6 +241,13 @@ const App: React.FC = () => {
   }, [gameState.money, unlockTitle]);
 
   const formatMoney = (val: number) => {
+    if (val >= 1e33) return '$' + (val / 1e33).toFixed(2).replace(/\.00$/, '') + 'Dc';
+    if (val >= 1e30) return '$' + (val / 1e30).toFixed(2).replace(/\.00$/, '') + 'No';
+    if (val >= 1e27) return '$' + (val / 1e27).toFixed(2).replace(/\.00$/, '') + 'Oc';
+    if (val >= 1e24) return '$' + (val / 1e24).toFixed(2).replace(/\.00$/, '') + 'Sp';
+    if (val >= 1e21) return '$' + (val / 1e21).toFixed(2).replace(/\.00$/, '') + 'Sx';
+    if (val >= 1e18) return '$' + (val / 1e18).toFixed(2).replace(/\.00$/, '') + 'Qi';
+    if (val >= 1e15) return '$' + (val / 1e15).toFixed(2).replace(/\.00$/, '') + 'Qa';
     if (val >= 1e12) return '$' + (val / 1e12).toFixed(2).replace(/\.00$/, '') + 'T';
     if (val >= 1e9) return '$' + (val / 1e9).toFixed(2).replace(/\.00$/, '') + 'B';
     if (val >= 1e6) return '$' + (val / 1e6).toFixed(2).replace(/\.00$/, '') + 'M';
@@ -793,7 +800,12 @@ const App: React.FC = () => {
       {/* Visual Overlays */}
       <div className="bg-noise pointer-events-none fixed inset-0 z-0" />
       <div className="bg-vignette pointer-events-none fixed inset-0 z-0" />
-      <ConfettiSystem streak={gameState.streak} isRichMode={isRichMode} />
+      <ConfettiSystem 
+        streak={gameState.streak} 
+        isRichMode={isRichMode} 
+        activeTitle={gameState.activeTitle}
+        momPurchases={gameState.stats.momPurchases}
+      />
       
       {/* Title Bar (Top Overlay) */}
       {gameState.activeTitle && (
