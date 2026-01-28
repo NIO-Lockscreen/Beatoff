@@ -83,20 +83,22 @@ const Shop: React.FC<ShopProps> = ({
     if (upgradeId === UpgradeType.PRESTIGE_MOM && prestigeLevel < 15) return false;
 
     // 3. Standard Upgrade Checks
-    // Logic: Unlocked if owned OR (Threshold met OR Prestige >= 1)
+    // Logic: Unlocked if owned OR Threshold met.
+    // NOTE: Removed prestigeLevel bypass to force re-unlocking via streak on every run.
     if (upgradeId === UpgradeType.PASSIVE_INCOME) {
         const owned = (upgrades[upgradeId] || 0) > 0;
-        if (!owned && maxStreak < 3 && prestigeLevel < 1) return false;
+        if (!owned && maxStreak < 3) return false;
     }
     if (upgradeId === UpgradeType.AUTO_FLIP) {
         if (hasPhantomHand) return false; // Hide if Phantom Hand is owned
         const owned = (upgrades[upgradeId] || 0) > 0;
-        if (!owned && maxStreak < 5 && prestigeLevel < 1) return false;
+        if (!owned && maxStreak < 5) return false;
     }
     if (upgradeId === UpgradeType.EDGING) {
         if (hasPrestigeEdging) return false; // Hide standard edging if prestige owned
         const owned = (upgrades[upgradeId] || 0) > 0;
-        if (!owned && maxStreak < 9 && prestigeLevel < 1) return false;
+        // Strictly enforce 9 streak for Edging
+        if (!owned && maxStreak < 9) return false;
     }
     
     return true;

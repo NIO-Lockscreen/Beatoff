@@ -99,66 +99,132 @@ const AUTO_BUY_TARGETS = [
     UpgradeType.AUTO_FLIP
 ];
 
+// --- SECURITY & SAVE SYSTEM ---
+const SALT = "VOID_SALT_8923_DO_NOT_TAMPER_WITH_FATE";
+
+const generateHash = (str: string) => {
+    let hash = 0;
+    const s = str + SALT;
+    for (let i = 0; i < s.length; i++) {
+        const char = s.charCodeAt(i);
+        hash = ((hash << 5) - hash) + char;
+        hash |= 0; // Convert to 32bit integer
+    }
+    return hash.toString(16);
+};
+
+// Unicode-safe Base64 helpers
+const toBase64 = (str: string) => {
+    try {
+        return btoa(encodeURIComponent(str).replace(/%([0-9A-F]{2})/g, (match, p1) => 
+            String.fromCharCode(parseInt(p1, 16))
+        ));
+    } catch (e) { return btoa(str); }
+};
+
+const fromBase64 = (str: string) => {
+    try {
+        return decodeURIComponent(Array.prototype.map.call(atob(str), (c: any) => 
+            '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)
+        ).join(''));
+    } catch (e) { return atob(str); }
+};
+
+const secureSave = (key: string, data: any) => {
+    try {
+        const json = JSON.stringify(data);
+        const encoded = toBase64(json);
+        const hash = generateHash(json);
+        localStorage.setItem(key, JSON.stringify({ d: encoded, h: hash }));
+    } catch (e) {
+        console.error("Save failed", e);
+    }
+};
+
+const secureLoad = (key: string): any | null => {
+    try {
+        const raw = localStorage.getItem(key);
+        if (!raw) return null;
+
+        // Legacy Check: If it's plain JSON (start with '{' and doesn't have 'd'/'h' structure check)
+        // We'll try to parse it. If it has 'd' and 'h', it's secure. If not, it's legacy.
+        let parsed;
+        try {
+            parsed = JSON.parse(raw);
+        } catch { return null; }
+
+        if (parsed && typeof parsed.d === 'string' && typeof parsed.h === 'string') {
+            // New Secure Format
+            const json = fromBase64(parsed.d);
+            const calculatedHash = generateHash(json);
+            if (calculatedHash !== parsed.h) {
+                console.warn(`Tamper detected for ${key}. Resetting.`);
+                alert("Save file integrity check failed. Progress has been reset to prevent cheating.");
+                return null;
+            }
+            return JSON.parse(json);
+        } else {
+            // Legacy Format (Migration)
+            console.log(`Migrating legacy save for ${key}...`);
+            return parsed;
+        }
+    } catch (e) {
+        console.error("Load failed", e);
+        return null;
+    }
+};
+
+
 const App: React.FC = () => {
   
   // --- Meta Data Management (Persistence across Resets) ---
   const getMetaStats = (): PlayerStats => {
-      try {
-          const s = localStorage.getItem(META_SAVE_KEY);
-          if (s) {
-              const parsed = JSON.parse(s);
-              // Migration for older saves that might miss new fields
-              return { ...INITIAL_STATS, ...parsed };
-          }
-      } catch (e) { console.error(e); }
+      const loaded = secureLoad(META_SAVE_KEY);
+      if (loaded) {
+          return { ...INITIAL_STATS, ...loaded };
+      }
       return INITIAL_STATS;
   };
 
   const saveMetaStats = (stats: PlayerStats) => {
-      localStorage.setItem(META_SAVE_KEY, JSON.stringify(stats));
+      secureSave(META_SAVE_KEY, stats);
   };
 
   // --- State Initialization ---
   const [gameState, setGameState] = useState<GameState>(() => {
-    try {
-      const saved = localStorage.getItem(SAVE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        // Ensure upgrades object has the new keys if loading old save
+    const loaded = secureLoad(SAVE_KEY);
+    if (loaded) {
+        // Migration for older saves that might miss new fields
         const defaults = INITIAL_STATE.upgrades;
         for (const key of Object.keys(defaults) as UpgradeType[]) {
-             if (typeof parsed.upgrades[key] === 'undefined') {
-                 parsed.upgrades[key] = 0;
+             if (typeof loaded.upgrades[key] === 'undefined') {
+                 loaded.upgrades[key] = 0;
              }
         }
-        if (typeof parsed.prestigeLevel === 'undefined') parsed.prestigeLevel = 0;
-        if (typeof parsed.voidFragments === 'undefined') parsed.voidFragments = 0;
-        if (typeof parsed.autoFlipEnabled === 'undefined') parsed.autoFlipEnabled = true;
-        if (typeof parsed.autoBuyEnabled === 'undefined') parsed.autoBuyEnabled = false;
+        if (typeof loaded.prestigeLevel === 'undefined') loaded.prestigeLevel = 0;
+        if (typeof loaded.voidFragments === 'undefined') loaded.voidFragments = 0;
+        if (typeof loaded.autoFlipEnabled === 'undefined') loaded.autoFlipEnabled = true;
+        if (typeof loaded.autoBuyEnabled === 'undefined') loaded.autoBuyEnabled = false;
         
-        // Initialize seenUpgrades for legacy saves
-        if (!parsed.seenUpgrades) {
-            parsed.seenUpgrades = [UpgradeType.CHANCE, UpgradeType.SPEED, UpgradeType.COMBO, UpgradeType.VALUE];
-            Object.keys(parsed.upgrades).forEach((key) => {
+        if (!loaded.seenUpgrades) {
+            loaded.seenUpgrades = [UpgradeType.CHANCE, UpgradeType.SPEED, UpgradeType.COMBO, UpgradeType.VALUE];
+            Object.keys(loaded.upgrades).forEach((key) => {
                 const k = key as UpgradeType;
-                if (parsed.upgrades[k] > 0 && !parsed.seenUpgrades.includes(k)) {
-                    parsed.seenUpgrades.push(k);
+                if (loaded.upgrades[k] > 0 && !loaded.seenUpgrades.includes(k)) {
+                    loaded.seenUpgrades.push(k);
                 }
             });
         }
         
         // Load Meta Stats for Leaderboard Accuracy
         const metaStats = getMetaStats();
-        parsed.stats = metaStats; // Always trust meta storage for stats
+        loaded.stats = metaStats; 
 
-        if (!parsed.unlockedTitles) parsed.unlockedTitles = {};
-        if (typeof parsed.isPuristRun === 'undefined') parsed.isPuristRun = true;
-        if (typeof parsed.hasCheated === 'undefined') parsed.hasCheated = false;
+        if (!loaded.unlockedTitles) loaded.unlockedTitles = {};
+        if (typeof loaded.isPuristRun === 'undefined') loaded.isPuristRun = true;
+        if (typeof loaded.hasCheated === 'undefined') loaded.hasCheated = false;
 
-        return parsed;
-      }
-    } catch (e) {
-      console.error("Failed to load save", e);
+        return loaded;
     }
     
     // If no save, load meta stats anyway
@@ -184,7 +250,7 @@ const App: React.FC = () => {
 
   // --- Persistence ---
   useEffect(() => {
-    localStorage.setItem(SAVE_KEY, JSON.stringify(gameState));
+    secureSave(SAVE_KEY, gameState);
   }, [gameState]);
 
   // --- Mute Sync ---
@@ -662,9 +728,11 @@ const App: React.FC = () => {
   };
 
   const registerName = (name: string) => {
-      if (name === "cheater") {
-          LeaderboardService.wipeCheaters();
-          setGameState(prev => ({ ...prev, playerName: "cheater" }));
+      // WIPE CHEATERS COMMAND
+      if (name.toLowerCase() === "cheater") {
+          LeaderboardService.wipeCheaters().finally(() => {
+              setGameState(prev => ({ ...prev, playerName: "cheater" }));
+          });
           return;
       }
 
@@ -843,7 +911,7 @@ const App: React.FC = () => {
 
                   if (upgradeId === UpgradeType.EDGING) {
                       if (hasPrestigeEdging) continue; // Skip if Prestige Edging owned
-                      if (currentLevel === 0 && prev.maxStreak < 9 && prev.prestigeLevel < 1) continue;
+                      if (currentLevel === 0 && prev.maxStreak < 9) continue;
                   }
 
                   const cost = config.costTiers[currentLevel] || config.costTiers[config.costTiers.length - 1];

@@ -1,9 +1,18 @@
 import { GlobalLeaderboard, LeaderboardEntry } from '../types';
 
-// NPOINT CONFIGURATION
-// https://www.npoint.io/docs/b190545b7a1821a2daf4
-const BIN_ID = 'b190545b7a1821a2daf4'; 
-const API_URL = `https://api.npoint.io/${BIN_ID}`;
+// =================================================================================================
+// LEADERBOARD API CONFIGURATION
+// =================================================================================================
+//
+// CRITICAL: If the main cluster is rate-limited, failover to the backup node.
+// BACKUP ENDPOINT: https://www.npoint.io/docs/5c460922a3cce1f11663
+export const BACKUP_LEADERBOARD_URL = 'https://api.npoint.io/5c460922a3cce1f11663';
+//
+// =================================================================================================
+
+// Internal Shard Configuration
+const _bin = 'b190545b7a1821a2daf4'; 
+const API_URL = `https://api.npoint.io/${_bin}`;
 
 const LOCAL_STORAGE_KEY = 'beatTheOdds_local_board';
 
@@ -173,7 +182,8 @@ export const LeaderboardService = {
               
               (['purist', 'prestige', 'rich', 'mommy'] as const).forEach(cat => {
                   const initialLen = currentBoard[cat].length;
-                  const filtered = currentBoard[cat].filter(e => e.name !== 'cheater');
+                  // Case insensitive wipe
+                  const filtered = currentBoard[cat].filter(e => e.name.toLowerCase() !== 'cheater');
                   if (filtered.length !== initialLen) {
                       currentBoard[cat] = filtered;
                       hasChanges = true;

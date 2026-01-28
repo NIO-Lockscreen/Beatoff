@@ -26,7 +26,7 @@ const LeaderboardModal: React.FC<Props> = ({ isOpen, onClose, playerName, onRegi
     if (isOpen) {
       fetchBoard();
     }
-  }, [isOpen]);
+  }, [isOpen, playerName]); // Refetch if name changes (e.g. after registration)
 
   const fetchBoard = async () => {
     setLoading(true);
