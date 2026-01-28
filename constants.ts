@@ -195,6 +195,17 @@ export const UPGRADES: Record<UpgradeType, UpgradeConfig> = {
     getEffect: (level) => level,
     formatEffect: (val) => val > 0 ? "PERMANENT" : "LOCKED",
   },
+  [UpgradeType.PRESTIGE_AUTO_BUY]: {
+    id: UpgradeType.PRESTIGE_AUTO_BUY,
+    name: "Algorithmic Greed",
+    description: "Automatically purchases affordable dollar upgrades.",
+    baseCost: 10,
+    costTiers: [10],
+    maxLevel: 1,
+    isPrestige: true,
+    getEffect: (level) => level,
+    formatEffect: (val) => val > 0 ? "ENABLED" : "LOCKED",
+  },
   [UpgradeType.PRESTIGE_EDGING]: {
     id: UpgradeType.PRESTIGE_EDGING,
     name: "Abyssal Greed",

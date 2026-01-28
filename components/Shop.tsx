@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { UpgradeType } from '../types';
 import { UPGRADES } from '../constants';
-import { Zap, TrendingUp, Clock, Coins, PlayCircle, ShieldCheck, Flame, Ghost, Sparkles, Hourglass, Infinity, Skull, Crown, Heart, Power, Gem } from 'lucide-react';
+import { Zap, TrendingUp, Clock, Coins, PlayCircle, ShieldCheck, Flame, Ghost, Sparkles, Hourglass, Infinity, Skull, Crown, Heart, Power, Gem, Bot } from 'lucide-react';
 
 interface ShopProps {
   money: number;
@@ -12,6 +12,8 @@ interface ShopProps {
   maxStreak: number;
   autoFlipEnabled: boolean;
   onToggleAutoFlip: () => void;
+  autoBuyEnabled: boolean;
+  onToggleAutoBuy: () => void;
   seenUpgrades: UpgradeType[];
   onSeen: (id: UpgradeType) => void;
   momPurchases: number;
@@ -31,6 +33,7 @@ const ICONS = {
   [UpgradeType.PRESTIGE_FLUX]: Hourglass,
   [UpgradeType.PRESTIGE_PASSIVE]: Infinity,
   [UpgradeType.PRESTIGE_AUTO]: PlayCircle,
+  [UpgradeType.PRESTIGE_AUTO_BUY]: Bot,
   [UpgradeType.PRESTIGE_EDGING]: Skull,
   [UpgradeType.PRESTIGE_GOLD_DIGGER]: Gem,
   [UpgradeType.PRESTIGE_LIMITLESS]: Crown,
@@ -46,6 +49,8 @@ const Shop: React.FC<ShopProps> = ({
   maxStreak, 
   autoFlipEnabled, 
   onToggleAutoFlip,
+  autoBuyEnabled,
+  onToggleAutoBuy,
   seenUpgrades,
   onSeen,
   momPurchases
@@ -70,6 +75,7 @@ const Shop: React.FC<ShopProps> = ({
     // 2. Specific Prestige Tier Checks
     if (upgradeId === UpgradeType.PRESTIGE_PASSIVE && prestigeLevel < 2) return false;
     if (upgradeId === UpgradeType.PRESTIGE_AUTO && prestigeLevel < 3) return false;
+    if (upgradeId === UpgradeType.PRESTIGE_AUTO_BUY && prestigeLevel < 4) return false; // New Unlock
     if (upgradeId === UpgradeType.PRESTIGE_EDGING && prestigeLevel < 5) return false;
     if (upgradeId === UpgradeType.PRESTIGE_GOLD_DIGGER && prestigeLevel < 16) return false;
     if (upgradeId === UpgradeType.PRESTIGE_LIMITLESS && prestigeLevel < 10) return false;
@@ -202,7 +208,9 @@ const Shop: React.FC<ShopProps> = ({
 
     const isMom = upgrade.id === UpgradeType.PRESTIGE_MOM;
     const isAutoFlipType = (upgrade.id === UpgradeType.AUTO_FLIP || upgrade.id === UpgradeType.PRESTIGE_AUTO);
-    const showToggle = isAutoFlipType && currentLevel > 0;
+    const isAutoBuyType = (upgrade.id === UpgradeType.PRESTIGE_AUTO_BUY);
+    const showAutoFlipToggle = isAutoFlipType && currentLevel > 0;
+    const showAutoBuyToggle = isAutoBuyType && currentLevel > 0;
     
     const isUnseen = !seenUpgrades.includes(upgrade.id);
 
@@ -270,7 +278,7 @@ const Shop: React.FC<ShopProps> = ({
         </div>
         
         <div className="flex gap-2 relative z-10">
-            {showToggle && (
+            {showAutoFlipToggle && (
                 <button
                     onClick={onToggleAutoFlip}
                     className={`
@@ -284,6 +292,23 @@ const Shop: React.FC<ShopProps> = ({
                 >
                     <Power size={14} />
                     {autoFlipEnabled ? "ON" : "OFF"}
+                </button>
+            )}
+
+            {showAutoBuyToggle && (
+                <button
+                    onClick={onToggleAutoBuy}
+                    className={`
+                        flex-1 py-2 px-3 font-mono text-sm font-bold border transition-colors flex items-center justify-center gap-2
+                        ${autoBuyEnabled 
+                            ? 'border-purple-500 text-purple-500 bg-purple-900/20 hover:bg-purple-900/40' 
+                            : 'border-noir-600 text-noir-500 bg-black hover:border-noir-400 hover:text-noir-400'
+                        }
+                    `}
+                    title={autoBuyEnabled ? "Disable Auto Buy" : "Enable Auto Buy"}
+                >
+                    <Power size={14} />
+                    {autoBuyEnabled ? "ON" : "OFF"}
                 </button>
             )}
 

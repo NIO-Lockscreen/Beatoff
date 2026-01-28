@@ -16,6 +16,7 @@ export enum UpgradeType {
   // New Prestige Unlocks
   PRESTIGE_PASSIVE = 'PRESTIGE_PASSIVE', // Permanent Passive Income
   PRESTIGE_AUTO = 'PRESTIGE_AUTO',       // Permanent Auto Flip
+  PRESTIGE_AUTO_BUY = 'PRESTIGE_AUTO_BUY', // NEW: Auto Buyer
   PRESTIGE_EDGING = 'PRESTIGE_EDGING',   // Permanent Edging
   PRESTIGE_GOLD_DIGGER = 'PRESTIGE_GOLD_DIGGER', // New Multiplier
   PRESTIGE_LIMITLESS = 'PRESTIGE_LIMITLESS', // Break all limits
@@ -65,6 +66,7 @@ export interface GameState {
   prestigeLevel: number; // Multiplier for global income
   voidFragments: number; // Currency for prestige shop
   autoFlipEnabled: boolean; // Toggle for auto flippers
+  autoBuyEnabled: boolean; // Toggle for auto buyer
   
   // UX
   seenUpgrades: UpgradeType[]; // List of upgrades user has scrolled to/seen

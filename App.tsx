@@ -62,6 +62,7 @@ const INITIAL_STATE: GameState = {
     [UpgradeType.PRESTIGE_FLUX]: 0,
     [UpgradeType.PRESTIGE_PASSIVE]: 0,
     [UpgradeType.PRESTIGE_AUTO]: 0,
+    [UpgradeType.PRESTIGE_AUTO_BUY]: 0, // New
     [UpgradeType.PRESTIGE_EDGING]: 0,
     [UpgradeType.PRESTIGE_GOLD_DIGGER]: 0,
     [UpgradeType.PRESTIGE_LIMITLESS]: 0,
@@ -71,6 +72,7 @@ const INITIAL_STATE: GameState = {
   prestigeLevel: 0,
   voidFragments: 0,
   autoFlipEnabled: true,
+  autoBuyEnabled: false, // New
   seenUpgrades: [UpgradeType.CHANCE, UpgradeType.SPEED, UpgradeType.COMBO, UpgradeType.VALUE], // Base items always seen
   
   // New State
@@ -85,6 +87,17 @@ const INITIAL_STATE: GameState = {
 const SAVE_KEY = 'beatTheOdds_save';
 const META_SAVE_KEY = 'beatTheOdds_meta';
 const SEEN_COMPLIMENTS_KEY = 'beatTheOdds_seen_compliments';
+
+// Priority Order for Auto Buy
+const AUTO_BUY_TARGETS = [
+    UpgradeType.CHANCE,
+    UpgradeType.SPEED,
+    UpgradeType.COMBO,
+    UpgradeType.VALUE,
+    UpgradeType.PASSIVE_INCOME,
+    UpgradeType.EDGING,
+    UpgradeType.AUTO_FLIP
+];
 
 const App: React.FC = () => {
   
@@ -121,6 +134,7 @@ const App: React.FC = () => {
         if (typeof parsed.prestigeLevel === 'undefined') parsed.prestigeLevel = 0;
         if (typeof parsed.voidFragments === 'undefined') parsed.voidFragments = 0;
         if (typeof parsed.autoFlipEnabled === 'undefined') parsed.autoFlipEnabled = true;
+        if (typeof parsed.autoBuyEnabled === 'undefined') parsed.autoBuyEnabled = false;
         
         // Initialize seenUpgrades for legacy saves
         if (!parsed.seenUpgrades) {
@@ -181,6 +195,7 @@ const App: React.FC = () => {
   // --- Derived Values (Stats Calculation) ---
   
   const hasLimitless = (gameState.upgrades[UpgradeType.PRESTIGE_LIMITLESS] || 0) > 0;
+  const hasAlgorithmicGreed = (gameState.upgrades[UpgradeType.PRESTIGE_AUTO_BUY] || 0) > 0;
 
   // 1. Calculate Base Values from Prestige
   const prestigeKarmaMoney = UPGRADES[UpgradeType.PRESTIGE_KARMA].getEffect(gameState.upgrades[UpgradeType.PRESTIGE_KARMA] || 0);
@@ -618,7 +633,8 @@ const App: React.FC = () => {
           activeTitle: gameState.activeTitle || (newPrestigeLevel === 1 ? 'PRESTIGE' : gameState.activeTitle),
           isPuristRun: true, // Reset Purist run eligibility on new run
           hasCheated: gameState.hasCheated, // Cheater status persists across prestige
-          autoFlipEnabled: gameState.autoFlipEnabled // PRESERVE AUTOFLIP PREFERENCE
+          autoFlipEnabled: gameState.autoFlipEnabled, // PRESERVE AUTOFLIP PREFERENCE
+          autoBuyEnabled: gameState.autoBuyEnabled // PRESERVE AUTOBUY PREFERENCE
       };
 
       // Submit Scores ON ASCEND (New Game Start)
@@ -705,6 +721,13 @@ const App: React.FC = () => {
           // Toggling OFF does not invalidate run. Only triggering 'isAuto' flip does.
       }));
   };
+
+  const toggleAutoBuy = () => {
+      setGameState(prev => ({
+          ...prev,
+          autoBuyEnabled: !prev.autoBuyEnabled
+      }));
+  };
   
   // --- Keyboard Shortcuts ---
   useEffect(() => {
@@ -776,6 +799,64 @@ const App: React.FC = () => {
       return () => window.clearInterval(failsafeInterval);
   }, [hasAutoFlip, gameState.autoFlipEnabled, gameState.streak, isFlipping, hasWon, showMomModal, handleFlip]);
 
+
+  // --- Auto Buy Effect (Algorithmic Greed) ---
+  useEffect(() => {
+      if (!hasAlgorithmicGreed || !gameState.autoBuyEnabled) return;
+
+      const interval = setInterval(() => {
+          setGameState(prev => {
+              if (prev.streak >= 10 || prev.money <= 0) return prev; // Stop if won or broke
+
+              let currentMoney = prev.money;
+              let updatedUpgrades = { ...prev.upgrades };
+              let updatedSeen = [...prev.seenUpgrades];
+              let madePurchase = false;
+
+              // Check specific upgrades in order
+              for (const upgradeId of AUTO_BUY_TARGETS) {
+                  const config = UPGRADES[upgradeId];
+                  const currentLevel = updatedUpgrades[upgradeId] || 0;
+                  
+                  const hasLimitless = (updatedUpgrades[UpgradeType.PRESTIGE_LIMITLESS] || 0) > 0;
+                  const maxLevel = (hasLimitless && config.limitlessMaxLevel) 
+                        ? config.limitlessMaxLevel 
+                        : config.maxLevel;
+
+                  // Skip if maxed
+                  if (currentLevel >= maxLevel) continue;
+
+                  // Special Unlock Logic (Match Shop.tsx logic roughly)
+                  if (upgradeId === UpgradeType.PASSIVE_INCOME && prev.maxStreak < 3 && currentLevel === 0) continue;
+                  if (upgradeId === UpgradeType.AUTO_FLIP && prev.maxStreak < 5 && currentLevel === 0) continue;
+                  const hasPrestigeEdging = (updatedUpgrades[UpgradeType.PRESTIGE_EDGING] || 0) > 0;
+                  if (upgradeId === UpgradeType.EDGING && (hasPrestigeEdging || (prev.maxStreak < 9 && currentLevel === 0))) continue;
+
+                  const cost = config.costTiers[currentLevel] || config.costTiers[config.costTiers.length - 1];
+
+                  if (currentMoney >= cost) {
+                      currentMoney -= cost;
+                      updatedUpgrades[upgradeId] = currentLevel + 1;
+                      madePurchase = true;
+                      
+                      if (!updatedSeen.includes(upgradeId)) updatedSeen.push(upgradeId);
+                  }
+              }
+
+              if (madePurchase) {
+                  return {
+                      ...prev,
+                      money: currentMoney,
+                      upgrades: updatedUpgrades,
+                      seenUpgrades: updatedSeen
+                  };
+              }
+              return prev;
+          });
+      }, 1000); // Run every second
+
+      return () => clearInterval(interval);
+  }, [hasAlgorithmicGreed, gameState.autoBuyEnabled]);
 
   useEffect(() => {
     return () => {
@@ -917,6 +998,14 @@ const App: React.FC = () => {
                             <span className="text-noir-600">/ {WINNING_STREAK}</span>
                         </div>
                     </div>
+
+                    <div className="flex flex-col">
+                        <span className="text-[10px] uppercase tracking-widest text-noir-600 mb-0.5">Run Best</span>
+                        <span className={`text-2xl font-bold leading-none ${gameState.maxStreak > 0 ? 'text-noir-300' : 'text-noir-500'}`}>
+                            {gameState.maxStreak}
+                        </span>
+                    </div>
+
                     {gameState.prestigeLevel > 0 && (
                         <div className="flex flex-col">
                             <span className="text-[10px] uppercase tracking-widest text-purple-400 mb-0.5">Prestige</span>
@@ -1080,6 +1169,8 @@ const App: React.FC = () => {
         maxStreak={gameState.maxStreak}
         autoFlipEnabled={gameState.autoFlipEnabled}
         onToggleAutoFlip={toggleAutoFlip}
+        autoBuyEnabled={gameState.autoBuyEnabled}
+        onToggleAutoBuy={toggleAutoBuy}
         seenUpgrades={gameState.seenUpgrades}
         onSeen={handleUpgradeSeen}
         momPurchases={gameState.stats.momPurchases}
