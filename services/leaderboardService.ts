@@ -71,20 +71,24 @@ const enqueue = <T>(operation: () => Promise<T>): Promise<T> => {
 };
 
 export const LeaderboardService = {
-  getLeaderboard: async (): Promise<GlobalLeaderboard> => {
-    try {
+  // STRICT fetch: Throws if network fails or data is invalid.
+  // Used by submitScores to ensure we don't overwrite the DB with fallback data.
+  _fetchStrict: async (): Promise<GlobalLeaderboard> => {
       // Add cache busting
       const response = await fetch(`${API_URL}?_=${Date.now()}`);
       
       if (!response.ok) {
-        console.warn(`Leaderboard fetch failed: ${response.status}`);
-        return DEFAULT_BOARD;
+        throw new Error(`Leaderboard fetch failed: ${response.status}`);
       }
       
       const data = await response.json();
       
-      // Handle potential null/empty response from fresh bin or malformed data
-      if (!data) return DEFAULT_BOARD;
+      if (!data || typeof data !== 'object') {
+          // If we get null/undefined but 200 OK, it might be a fresh bin. 
+          // However, for safety in submitScores, we usually treat this as default, 
+          // but we must be careful. If it's truly empty (new bin), returning DEFAULT is fine.
+          return DEFAULT_BOARD;
+      }
 
       // Ensure all arrays exist to prevent crashes
       return {
@@ -93,6 +97,11 @@ export const LeaderboardService = {
           rich: Array.isArray(data.rich) ? data.rich : [],
           mommy: Array.isArray(data.mommy) ? data.mommy : []
       };
+  },
+
+  getLeaderboard: async (): Promise<GlobalLeaderboard> => {
+    try {
+      return await LeaderboardService._fetchStrict();
     } catch (e) {
       console.warn("Leaderboard fetch failed (using local fallback):", e);
       return getLocalBoard();
@@ -113,8 +122,10 @@ export const LeaderboardService = {
   ): Promise<GlobalLeaderboard> => {
       return enqueue(async () => {
         try {
-            // 1. Get current data
-            let currentBoard = await LeaderboardService.getLeaderboard();
+            // 1. Get current data (STRICT MODE)
+            // If this fails, we throw to the catch block and use local storage only.
+            // This prevents overwriting the API with an empty/stale local board.
+            let currentBoard = await LeaderboardService._fetchStrict();
 
             // 2. Apply all updates
             let hasChanges = false;
@@ -177,7 +188,8 @@ export const LeaderboardService = {
   wipeCheaters: async (): Promise<void> => {
       return enqueue(async () => {
           try {
-              const currentBoard = await LeaderboardService.getLeaderboard();
+              // Use strict fetch here too to ensure we don't wipe using a stale board
+              const currentBoard = await LeaderboardService._fetchStrict();
               let hasChanges = false;
               
               (['purist', 'prestige', 'rich', 'mommy'] as const).forEach(cat => {
