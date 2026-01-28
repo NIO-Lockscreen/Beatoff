@@ -755,8 +755,10 @@ const App: React.FC = () => {
           updates.push({ category: 'purist', entry: { name: finalName, score: gameState.stats.puristWins, date: now, title }});
       }
       
-      if (gameState.prestigeLevel > 0) {
-          updates.push({ category: 'prestige', entry: { name: finalName, score: gameState.prestigeLevel, date: now, title }});
+      // FIXED: Use maxPrestigeLevel for leaderboard instead of current run level
+      const bestPrestige = Math.max(gameState.prestigeLevel, gameState.stats.maxPrestigeLevel);
+      if (bestPrestige > 0) {
+          updates.push({ category: 'prestige', entry: { name: finalName, score: bestPrestige, date: now, title }});
       }
       
       if (gameState.stats.momPurchases > 0) {
