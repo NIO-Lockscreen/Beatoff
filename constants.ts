@@ -195,10 +195,21 @@ export const UPGRADES: Record<UpgradeType, UpgradeConfig> = {
     id: UpgradeType.PRESTIGE_GOLD_DIGGER,
     name: "Gold Digger",
     description: "Absurd wealth scaling for the dedicated.",
-    baseCost: 50,
-    costTiers: [50, 150, 500, 1500, 5000, 25000, 100000, 500000, 2500000, 10000000], // Absurd scaling
+    baseCost: 50000000,
+    costTiers: [
+        50000000,       // 50M
+        250000000,      // 250M
+        1000000000,     // 1B
+        5000000000,     // 5B
+        25000000000,    // 25B
+        100000000000,   // 100B
+        500000000000,   // 500B
+        2500000000000,  // 2.5T
+        10000000000000, // 10T
+        100000000000000 // 100T
+    ], 
     maxLevel: 10,
-    isPrestige: true,
+    isPrestige: true, // Note: Handled as Money cost in Shop
     getEffect: (level) => {
         if (level === 0) return 1;
         if (level === 1) return 2;
@@ -221,10 +232,9 @@ export const UPGRADES: Record<UpgradeType, UpgradeConfig> = {
     id: UpgradeType.PRESTIGE_MOM,
     name: "Your Mom",
     description: "???",
-    baseCost: 1000000, // COST INCREASED
+    baseCost: 1000000,
     costTiers: [1000000],
     maxLevel: 1,
-    // Note: isPrestige is false so it costs Money ($), but we will render it in Void shop manually
     isPrestige: false, 
     getEffect: (level) => level > 0 ? 1 : 0,
     formatEffect: (val) => "???",

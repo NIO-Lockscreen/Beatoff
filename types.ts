@@ -40,8 +40,9 @@ export interface UpgradeConfig {
 export interface PlayerStats {
   puristWins: number;      // Wins without auto flip
   momPurchases: number;    // Times "Your Mom" was bought
-  highestCash: number;     // Highest cash ever held
-  totalPrestiges: number;  // Times prestiged
+  highestCash: number;     // Highest cash ever held (at time of win)
+  totalPrestiges: number;  // Total number of prestiges performed
+  maxPrestigeLevel: number; // Highest prestige level reached (for leaderboard)
 }
 
 export interface Title {

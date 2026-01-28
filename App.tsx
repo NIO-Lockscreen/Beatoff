@@ -40,6 +40,7 @@ const INITIAL_STATS: PlayerStats = {
     momPurchases: 0,
     highestCash: 0,
     totalPrestiges: 0,
+    maxPrestigeLevel: 0,
 };
 
 const INITIAL_STATE: GameState = {
@@ -82,10 +83,29 @@ const INITIAL_STATE: GameState = {
 };
 
 const SAVE_KEY = 'beatTheOdds_save';
+const META_SAVE_KEY = 'beatTheOdds_meta';
 const SEEN_COMPLIMENTS_KEY = 'beatTheOdds_seen_compliments';
 
 const App: React.FC = () => {
-  // --- State ---
+  
+  // --- Meta Data Management (Persistence across Resets) ---
+  const getMetaStats = (): PlayerStats => {
+      try {
+          const s = localStorage.getItem(META_SAVE_KEY);
+          if (s) {
+              const parsed = JSON.parse(s);
+              // Migration for older saves that might miss new fields
+              return { ...INITIAL_STATS, ...parsed };
+          }
+      } catch (e) { console.error(e); }
+      return INITIAL_STATS;
+  };
+
+  const saveMetaStats = (stats: PlayerStats) => {
+      localStorage.setItem(META_SAVE_KEY, JSON.stringify(stats));
+  };
+
+  // --- State Initialization ---
   const [gameState, setGameState] = useState<GameState>(() => {
     try {
       const saved = localStorage.getItem(SAVE_KEY);
@@ -105,7 +125,6 @@ const App: React.FC = () => {
         // Initialize seenUpgrades for legacy saves
         if (!parsed.seenUpgrades) {
             parsed.seenUpgrades = [UpgradeType.CHANCE, UpgradeType.SPEED, UpgradeType.COMBO, UpgradeType.VALUE];
-            // If user already owns something, mark it as seen so it doesn't blink
             Object.keys(parsed.upgrades).forEach((key) => {
                 const k = key as UpgradeType;
                 if (parsed.upgrades[k] > 0 && !parsed.seenUpgrades.includes(k)) {
@@ -114,8 +133,10 @@ const App: React.FC = () => {
             });
         }
         
-        // Init New Logic
-        if (!parsed.stats) parsed.stats = INITIAL_STATS;
+        // Load Meta Stats for Leaderboard Accuracy
+        const metaStats = getMetaStats();
+        parsed.stats = metaStats; // Always trust meta storage for stats
+
         if (!parsed.unlockedTitles) parsed.unlockedTitles = {};
         if (typeof parsed.isPuristRun === 'undefined') parsed.isPuristRun = true;
         if (typeof parsed.hasCheated === 'undefined') parsed.hasCheated = false;
@@ -125,7 +146,10 @@ const App: React.FC = () => {
     } catch (e) {
       console.error("Failed to load save", e);
     }
-    return JSON.parse(JSON.stringify(INITIAL_STATE));
+    
+    // If no save, load meta stats anyway
+    const metaStats = getMetaStats();
+    return { ...INITIAL_STATE, stats: metaStats };
   });
 
   const [isFlipping, setIsFlipping] = useState(false);
@@ -211,13 +235,8 @@ const App: React.FC = () => {
       if (gameState.money > 10000000) {
           unlockTitle('RICH', 1);
       }
-      if (gameState.money > gameState.stats.highestCash) {
-          setGameState(prev => ({
-              ...prev,
-              stats: { ...prev.stats, highestCash: prev.money }
-          }));
-      }
-  }, [gameState.money, gameState.stats.highestCash, unlockTitle]);
+      // Removed automatic Highest Cash update. Now handled in handleFlip(win)
+  }, [gameState.money, unlockTitle]);
 
   
   // --- Actions ---
@@ -274,20 +293,33 @@ const App: React.FC = () => {
         
         const newMaxStreak = Math.max(prev.maxStreak, newStreak);
         const won = newStreak >= WINNING_STREAK;
-        
-        // INVALIDATE PURIST RUN IF AUTO FLIP
+        const finalMoney = prev.money + earned;
+
+        // INVALIDATE PURIST RUN IF AUTO FLIP used
+        // Spec: "No autoflipper was used at any point during that run"
         const nextIsPuristRun = isAuto ? false : prev.isPuristRun;
 
+        let nextStats = { ...prev.stats };
+        let nextTitles = { ...prev.unlockedTitles };
+        let nextActiveTitle = prev.activeTitle;
+
+        // --- WIN CONDITION HANDLER (STATE UPDATE) ---
         if (won && !hasWon) {
-           setTimeout(() => {
-               setHasWon(true);
-               // Trigger Leaderboard / Name Entry
-               if (!prev.playerName) {
-                   setShowLeaderboard(true);
-               }
-           }, 500);
-           
-           // PURIST Logic - Only increment if nextIsPuristRun is TRUE
+           // 1. PURIST LOGIC
+           // Only increment if we are still in a purist run
+           if (nextIsPuristRun) {
+               nextStats.puristWins += 1;
+               
+               // Unlock Title
+               nextTitles['PURIST'] = nextStats.puristWins;
+               if (!nextActiveTitle) nextActiveTitle = 'PURIST';
+           }
+
+           // 2. RICH LOGIC
+           // "Tracks the highest amount of cash held at the moment of round completion"
+           if (finalMoney > nextStats.highestCash) {
+               nextStats.highestCash = finalMoney;
+           }
         }
 
         if (isHeads) {
@@ -310,30 +342,15 @@ const App: React.FC = () => {
                 if (newStreak === 9 && prev.maxStreak < 9 && !edgingOwned && !prestigeEdgingOwned) message = "EDGING UNLOCKED";
 
                 setCelebration({ text: message, level: newStreak, id: Date.now() });
-                celebrationTimeoutRef.current = window.setTimeout(() => setCelebration(null), 2500) as unknown as number;
+                celebrationTimeoutRef.current = window.setTimeout(() => setCelebration(null), 2500) as any;
             }
         } else {
              if (currentSpeed > 50) AudioService.playTails();
         }
 
-        // Stats Update for Win
-        let nextStats = { ...prev.stats };
-        let nextTitles = { ...prev.unlockedTitles };
-        let nextActiveTitle = prev.activeTitle;
-
-        if (won && !hasWon) {
-            if (nextIsPuristRun) {
-                nextStats.puristWins += 1;
-                // Unlock Purist Title
-                const level = nextStats.puristWins;
-                nextTitles['PURIST'] = level;
-                if (!nextActiveTitle) nextActiveTitle = 'PURIST';
-            }
-        }
-
         return {
           ...prev,
-          money: prev.money + earned,
+          money: finalMoney,
           streak: newStreak,
           maxStreak: newMaxStreak,
           totalFlips: prev.totalFlips + 1,
@@ -347,9 +364,43 @@ const App: React.FC = () => {
 
       setCoinSide(result);
       setIsFlipping(false);
-    }, duration) as unknown as number;
+    }, duration) as any;
 
   }, [isFlipping, hasWon, currentChance, currentSpeed, currentBaseValue, currentCombo, prestigeMultiplier, showMomModal, gameState.streak]);
+
+  // --- Effect: Handle Win Side Effects (Once per run) ---
+  useEffect(() => {
+    if (gameState.streak >= 10 && !hasWon) {
+        setHasWon(true);
+        // Trigger Leaderboard / Name Entry
+        if (!gameState.playerName) {
+            setShowLeaderboard(true);
+        }
+
+        // Save Meta Data immediately on win
+        saveMetaStats(gameState.stats);
+
+        // Submit Leaderboard Scores
+        if (gameState.playerName) {
+            const name = gameState.hasCheated ? "cheater" : gameState.playerName;
+            const now = Date.now();
+            const title = gameState.activeTitle || undefined;
+            
+            const updates = [];
+            // We check the stats object which was updated in handleFlip
+            if (gameState.isPuristRun) {
+                updates.push({ category: 'purist', entry: { name, score: gameState.stats.puristWins, date: now, title } });
+            }
+            if (gameState.money >= gameState.stats.highestCash) {
+                updates.push({ category: 'rich', entry: { name, score: gameState.stats.highestCash, date: now, title } });
+            }
+            
+            // @ts-ignore
+            if (updates.length > 0) LeaderboardService.submitScores(updates);
+        }
+    }
+  }, [gameState.streak, hasWon, gameState.isPuristRun, gameState.money, gameState.stats, gameState.playerName, gameState.hasCheated, gameState.activeTitle]);
+
 
   const triggerMomEvent = () => {
       // Get seen list
@@ -381,14 +432,17 @@ const App: React.FC = () => {
       } catch (e) { console.error(e); }
 
       // Reset
-      localStorage.removeItem(SAVE_KEY);
+      localStorage.removeItem(SAVE_KEY); // Wipe game state
       setShowMomModal({ show: false, text: "" });
       
+      // Load Meta Stats (Survives Reset)
+      const metaStats = getMetaStats();
+
       // Preserve Leaderboard Identity but reset run
       const freshState = JSON.parse(JSON.stringify(INITIAL_STATE));
       freshState.playerName = gameState.playerName;
-      freshState.stats = gameState.stats;
-      freshState.unlockedTitles = gameState.unlockedTitles;
+      freshState.stats = metaStats; // Restore meta stats
+      freshState.unlockedTitles = gameState.unlockedTitles; // Keep titles? Spec implies reset except MOM logic, but titles are tied to meta stats usually. Let's keep them.
       freshState.activeTitle = gameState.activeTitle;
       freshState.hasCheated = false; // RESET CHEATER FLAG ON RESET
 
@@ -403,9 +457,14 @@ const App: React.FC = () => {
     // Intercept "Your Mom" upgrade
     if (type === UpgradeType.PRESTIGE_MOM) {
         if (gameState.money >= cost) {
+            
+            // 4. MOMMY LOGIC
+            // Immediate meta-update before reset
+            const nextStats = { ...gameState.stats, momPurchases: gameState.stats.momPurchases + 1 };
+            saveMetaStats(nextStats);
+
             setGameState(prev => {
-                const nextStats = { ...prev.stats, momPurchases: prev.stats.momPurchases + 1 };
-                // Unlock Title
+                // Unlock Title locally for visual continuity before reload
                 const nextTitles = { ...prev.unlockedTitles };
                 if (nextStats.momPurchases > 1) {
                      nextTitles['MOMMY'] = nextStats.momPurchases;
@@ -424,8 +483,7 @@ const App: React.FC = () => {
                 const now = Date.now();
                 const title = gameState.activeTitle || undefined;
                 LeaderboardService.submitScores([
-                    { category: 'mommy', entry: { name, score: gameState.stats.momPurchases + 1, date: now, title } },
-                    { category: 'rich', entry: { name, score: gameState.stats.highestCash, date: now, title } }
+                    { category: 'mommy', entry: { name, score: nextStats.momPurchases, date: now, title } },
                 ]);
             }
 
@@ -433,9 +491,6 @@ const App: React.FC = () => {
         }
         return;
     }
-
-    // REMOVED manual isPuristRun=false for AUTO_FLIP. 
-    // It is now handled by handleFlip(..., true) being called by the auto-flipper effect.
 
     if (isPrestige) {
         if (gameState.voidFragments >= cost) {
@@ -479,6 +534,7 @@ const App: React.FC = () => {
 
   const hardReset = () => {
     localStorage.removeItem(SAVE_KEY);
+    localStorage.removeItem(META_SAVE_KEY); // Full Wipe
     setGameState(JSON.parse(JSON.stringify(INITIAL_STATE)));
     setHasWon(false);
     setCoinSide(null);
@@ -510,7 +566,14 @@ const App: React.FC = () => {
           nextTitles['PRESTIGE'] = newPrestigeLevel;
       }
       
-      const nextStats = { ...gameState.stats, totalPrestiges: gameState.stats.totalPrestiges + 1 };
+      // 3. PRESTIGE LOGIC
+      // "Check if currentPrestige > prestigeLeaderboardMax"
+      const nextStats = { 
+          ...gameState.stats, 
+          totalPrestiges: gameState.stats.totalPrestiges + 1,
+          maxPrestigeLevel: Math.max(gameState.stats.maxPrestigeLevel, newPrestigeLevel)
+      };
+      saveMetaStats(nextStats);
 
       const nextState: GameState = {
           ...INITIAL_STATE,
@@ -525,7 +588,7 @@ const App: React.FC = () => {
           stats: nextStats,
           unlockedTitles: nextTitles,
           activeTitle: gameState.activeTitle || (newPrestigeLevel === 1 ? 'PRESTIGE' : gameState.activeTitle),
-          isPuristRun: true, // Reset Purist run eligibility
+          isPuristRun: true, // Reset Purist run eligibility on new run
           hasCheated: gameState.hasCheated, // Cheater status persists across prestige
           autoFlipEnabled: gameState.autoFlipEnabled // PRESERVE AUTOFLIP PREFERENCE
       };
@@ -536,17 +599,15 @@ const App: React.FC = () => {
           const now = Date.now();
           const title = gameState.activeTitle || undefined;
 
-          const updates: { category: keyof GlobalLeaderboard; entry: LeaderboardEntry }[] = [
-             { category: 'prestige', entry: { name, score: newPrestigeLevel, date: now, title } },
-             { category: 'rich', entry: { name, score: gameState.stats.highestCash, date: now, title } },
-             { category: 'purist', entry: { name, score: gameState.stats.puristWins, date: now, title } },
-             { category: 'mommy', entry: { name, score: gameState.stats.momPurchases, date: now, title } }
-          ];
-
-          // Filter out zero entries if needed
-          const validUpdates = updates.filter(u => u.entry.score > 0);
-          if (validUpdates.length > 0) {
-              LeaderboardService.submitScores(validUpdates);
+          // Only submit Prestige score if we beat the max (which we checked above, or if its a new max)
+          const updates: { category: keyof GlobalLeaderboard; entry: LeaderboardEntry }[] = [];
+          
+          if (newPrestigeLevel >= nextStats.maxPrestigeLevel) {
+               updates.push({ category: 'prestige', entry: { name, score: newPrestigeLevel, date: now, title } });
+          }
+          
+          if (updates.length > 0) {
+              LeaderboardService.submitScores(updates);
           }
       }
 
@@ -594,7 +655,7 @@ const App: React.FC = () => {
         hardReset();
     } else {
         setDeleteConfirm(true);
-        deleteTimeoutRef.current = window.setTimeout(() => setDeleteConfirm(false), 3000) as unknown as number;
+        deleteTimeoutRef.current = window.setTimeout(() => setDeleteConfirm(false), 3000) as any;
     }
   };
 
@@ -607,8 +668,7 @@ const App: React.FC = () => {
       setGameState(prev => ({
           ...prev,
           autoFlipEnabled: !prev.autoFlipEnabled,
-          // REMOVED manual isPuristRun: false
-          // Allowing toggling off to theoretically save a run if done before first flip
+          // Toggling OFF does not invalidate run. Only triggering 'isAuto' flip does.
       }));
   };
   
@@ -640,8 +700,7 @@ const App: React.FC = () => {
             }));
         }
 
-        // HIDDEN CODE: ZEX (+5 Prestige) - This is a secret code, not a cheat, so we don't flag it? 
-        // Or should we? Assuming secret codes are features, debug keys are cheats.
+        // HIDDEN CODE: ZEX (+5 Prestige)
         if (e.key) {
            cheatCodeBuffer.current = (cheatCodeBuffer.current + (e.key as string)).toUpperCase().slice(-3);
            if (cheatCodeBuffer.current === "ZEX") {
@@ -666,7 +725,7 @@ const App: React.FC = () => {
     
     if (shouldAutoFlip && !isFlipping && !hasWon && !showMomModal.show) {
         // CALL handleFlip with isAuto = true
-        timer = window.setTimeout(() => handleFlip(false, true), 300) as unknown as number;
+        timer = window.setTimeout(() => handleFlip(false, true), 300) as any;
     }
     return () => { if (timer) window.clearTimeout(timer); };
   }, [hasAutoFlip, isFlipping, hasWon, handleFlip, showMomModal, gameState.autoFlipEnabled, gameState.streak]);
@@ -679,7 +738,7 @@ const App: React.FC = () => {
               // CALL handleFlip with isAuto = true
               handleFlip(false, true);
           }
-      }, 2000) as unknown as number; 
+      }, 2000) as any; 
       return () => window.clearInterval(failsafeInterval);
   }, [hasAutoFlip, gameState.autoFlipEnabled, gameState.streak, isFlipping, hasWon, showMomModal, handleFlip]);
 
@@ -996,7 +1055,7 @@ const App: React.FC = () => {
             onRegisterName={registerName}
             currentStats={gameState.stats ? {
                 purist: gameState.stats.puristWins,
-                prestige: gameState.prestigeLevel,
+                prestige: gameState.stats.maxPrestigeLevel,
                 rich: gameState.stats.highestCash,
                 mommy: gameState.stats.momPurchases
             } : undefined}

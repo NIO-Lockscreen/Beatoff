@@ -1,5 +1,5 @@
 {
-  "name": "Copy of Beat the Odds",
+  "name": "Beat the Odds - Leaderboard",
   "description": "A noir-style incremental game about probability and persistence. Flip an unfair coin, buy upgrades, and attempt to achieve the impossible streak of 10 heads.",
   "requestFramePermissions": []
 }

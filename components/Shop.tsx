@@ -71,7 +71,7 @@ const Shop: React.FC<ShopProps> = ({
     if (upgradeId === UpgradeType.PRESTIGE_PASSIVE && prestigeLevel < 2) return false;
     if (upgradeId === UpgradeType.PRESTIGE_AUTO && prestigeLevel < 3) return false;
     if (upgradeId === UpgradeType.PRESTIGE_EDGING && prestigeLevel < 5) return false;
-    if (upgradeId === UpgradeType.PRESTIGE_GOLD_DIGGER && prestigeLevel < 10) return false;
+    if (upgradeId === UpgradeType.PRESTIGE_GOLD_DIGGER && prestigeLevel < 16) return false;
     if (upgradeId === UpgradeType.PRESTIGE_LIMITLESS && prestigeLevel < 10) return false;
     if (upgradeId === UpgradeType.PRESTIGE_MOM && prestigeLevel < 15) return false;
 
@@ -142,6 +142,13 @@ const Shop: React.FC<ShopProps> = ({
     return () => observerRef.current?.disconnect();
   }, [seenUpgrades, onSeen, unseenCount]);
 
+  const formatCost = (val: number) => {
+    if (val >= 1e12) return (val / 1e12).toFixed(1).replace(/\.0$/, '') + 'T';
+    if (val >= 1e9) return (val / 1e9).toFixed(1).replace(/\.0$/, '') + 'B';
+    if (val >= 1e6) return (val / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
+    if (val >= 1e3) return (val / 1e3).toFixed(1).replace(/\.0$/, '') + 'k';
+    return val.toLocaleString();
+  };
 
   const renderUpgrade = (upgradeId: UpgradeType) => {
     // Use isUnlocked to ensure consistency with the indicator logic
@@ -158,9 +165,12 @@ const Shop: React.FC<ShopProps> = ({
     let cost = isMaxed ? 0 : (upgrade.costTiers[currentLevel] || upgrade.costTiers[upgrade.costTiers.length - 1]);
     const isPrestige = upgrade.isPrestige || false;
     
-    if (isPrestige && cost > 50) cost = 50;
     // Exception for Gold Digger & Mom
-    if (upgrade.id === UpgradeType.PRESTIGE_GOLD_DIGGER) cost = upgrade.costTiers[currentLevel] || upgrade.costTiers[upgrade.costTiers.length - 1];
+    if (upgrade.id === UpgradeType.PRESTIGE_GOLD_DIGGER) {
+        cost = upgrade.costTiers[currentLevel] || upgrade.costTiers[upgrade.costTiers.length - 1];
+    } else if (isPrestige && cost > 50) {
+        cost = 50;
+    }
     
     const currency = isPrestige ? voidFragments : money;
     // Gold Digger is prestige but costs money
@@ -293,7 +303,7 @@ const Shop: React.FC<ShopProps> = ({
                 }
             `}
             >
-            {isMaxed ? 'MAXED' : `${isPrestige && !isGoldDigger ? '🟣 ' : '$'}${cost.toLocaleString()}`}
+            {isMaxed ? 'MAXED' : `${isPrestige && !isGoldDigger ? '🟣 ' : '$'}${formatCost(cost)}`}
             </button>
         </div>
       </div>

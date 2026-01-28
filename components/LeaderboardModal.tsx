@@ -42,6 +42,16 @@ const LeaderboardModal: React.FC<Props> = ({ isOpen, onClose, playerName, onRegi
     }
   };
 
+  const formatScore = (val: number, type: 'count' | 'money') => {
+      if (type === 'count') return val.toString();
+      
+      if (val >= 1e12) return '$' + (val / 1e12).toFixed(1).replace(/\.0$/, '') + 'T';
+      if (val >= 1e9) return '$' + (val / 1e9).toFixed(1).replace(/\.0$/, '') + 'B';
+      if (val >= 1e6) return '$' + (val / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
+      if (val >= 1e3) return '$' + (val / 1e3).toFixed(1).replace(/\.0$/, '') + 'k';
+      return '$' + val.toLocaleString();
+  };
+
   // If user hasn't registered a name yet, show registration
   if (isOpen && !playerName) {
       return (
@@ -169,7 +179,7 @@ const LeaderboardModal: React.FC<Props> = ({ isOpen, onClose, playerName, onRegi
                     )}
                     {board && activeTab === 'purist' && board.purist.map((e, i) => renderEntry(e, i, (v) => `${v} Wins`))}
                     {board && activeTab === 'prestige' && board.prestige.map((e, i) => renderEntry(e, i, (v) => `Lvl ${v}`))}
-                    {board && activeTab === 'rich' && board.rich.map((e, i) => renderEntry(e, i, (v) => `$${v.toLocaleString()}`))}
+                    {board && activeTab === 'rich' && board.rich.map((e, i) => renderEntry(e, i, (v) => formatScore(v, 'money')))}
                     {board && activeTab === 'mommy' && board.mommy.map((e, i) => renderEntry(e, i, (v) => `${v} purchases`))}
                 </div>
             )}
@@ -182,7 +192,7 @@ const LeaderboardModal: React.FC<Props> = ({ isOpen, onClose, playerName, onRegi
                 <span className="text-amber-500">
                     {activeTab === 'purist' && `${currentStats.purist} Wins`}
                     {activeTab === 'prestige' && `Lvl ${currentStats.prestige}`}
-                    {activeTab === 'rich' && `$${currentStats.rich.toLocaleString()}`}
+                    {activeTab === 'rich' && formatScore(currentStats.rich, 'money')}
                     {activeTab === 'mommy' && `${currentStats.mommy}`}
                 </span>
             </div>
