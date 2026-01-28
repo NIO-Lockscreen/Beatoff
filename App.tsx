@@ -813,6 +813,9 @@ const App: React.FC = () => {
               let updatedSeen = [...prev.seenUpgrades];
               let madePurchase = false;
 
+              const hasPhantomHand = (updatedUpgrades[UpgradeType.PRESTIGE_AUTO] || 0) > 0;
+              const hasPrestigeEdging = (updatedUpgrades[UpgradeType.PRESTIGE_EDGING] || 0) > 0;
+
               // Check specific upgrades in order
               for (const upgradeId of AUTO_BUY_TARGETS) {
                   const config = UPGRADES[upgradeId];
@@ -827,10 +830,21 @@ const App: React.FC = () => {
                   if (currentLevel >= maxLevel) continue;
 
                   // Special Unlock Logic (Match Shop.tsx logic roughly)
-                  if (upgradeId === UpgradeType.PASSIVE_INCOME && prev.maxStreak < 3 && currentLevel === 0) continue;
-                  if (upgradeId === UpgradeType.AUTO_FLIP && prev.maxStreak < 5 && currentLevel === 0) continue;
-                  const hasPrestigeEdging = (updatedUpgrades[UpgradeType.PRESTIGE_EDGING] || 0) > 0;
-                  if (upgradeId === UpgradeType.EDGING && (hasPrestigeEdging || (prev.maxStreak < 9 && currentLevel === 0))) continue;
+                  // Standard items unlock if: Owned OR (Streak Threshold Met OR Prestige >= 1)
+                  
+                  if (upgradeId === UpgradeType.PASSIVE_INCOME) {
+                      if (currentLevel === 0 && prev.maxStreak < 3 && prev.prestigeLevel < 1) continue;
+                  }
+
+                  if (upgradeId === UpgradeType.AUTO_FLIP) {
+                      if (hasPhantomHand) continue; // Skip if Phantom Hand owned (it's hidden in shop)
+                      if (currentLevel === 0 && prev.maxStreak < 5 && prev.prestigeLevel < 1) continue;
+                  }
+
+                  if (upgradeId === UpgradeType.EDGING) {
+                      if (hasPrestigeEdging) continue; // Skip if Prestige Edging owned
+                      if (currentLevel === 0 && prev.maxStreak < 9 && prev.prestigeLevel < 1) continue;
+                  }
 
                   const cost = config.costTiers[currentLevel] || config.costTiers[config.costTiers.length - 1];
 
