@@ -208,6 +208,8 @@ const App: React.FC = () => {
   
   const prestigeMultiplier = 1 + (gameState.prestigeLevel * 0.1);
 
+  const isRichMode = (gameState.activeTitle === 'RICH' && gameState.money >= 1000000);
+
   // --- Helper: Unlock Title ---
   const unlockTitle = useCallback((titleId: string, level: number = 1) => {
      setGameState(prev => {
@@ -238,6 +240,12 @@ const App: React.FC = () => {
       // Removed automatic Highest Cash update. Now handled in handleFlip(win)
   }, [gameState.money, unlockTitle]);
 
+  const formatMoney = (val: number) => {
+    if (val >= 1e12) return '$' + (val / 1e12).toFixed(2).replace(/\.00$/, '') + 'T';
+    if (val >= 1e9) return '$' + (val / 1e9).toFixed(2).replace(/\.00$/, '') + 'B';
+    if (val >= 1e6) return '$' + (val / 1e6).toFixed(2).replace(/\.00$/, '') + 'M';
+    return '$' + val.toLocaleString();
+  };
   
   // --- Actions ---
 
@@ -492,6 +500,19 @@ const App: React.FC = () => {
         return;
     }
 
+    // SPECIAL CASE: Gold Digger is Prestige Category but Money Cost
+    if (type === UpgradeType.PRESTIGE_GOLD_DIGGER) {
+        if (gameState.money >= cost) {
+            setGameState(prev => ({
+                ...prev,
+                money: prev.money - cost,
+                upgrades: { ...prev.upgrades, [type]: (prev.upgrades[type] || 0) + 1 }
+            }));
+            AudioService.playFlip();
+        }
+        return;
+    }
+
     if (isPrestige) {
         if (gameState.voidFragments >= cost) {
             setGameState((prev: GameState) => {
@@ -618,6 +639,12 @@ const App: React.FC = () => {
   };
 
   const registerName = (name: string) => {
+      if (name === "cheater") {
+          LeaderboardService.wipeCheaters();
+          setGameState(prev => ({ ...prev, playerName: "cheater" }));
+          return;
+      }
+
       // Force "cheater" if flag is set
       const finalName = gameState.hasCheated ? "cheater" : name;
       
@@ -766,7 +793,7 @@ const App: React.FC = () => {
       {/* Visual Overlays */}
       <div className="bg-noise pointer-events-none fixed inset-0 z-0" />
       <div className="bg-vignette pointer-events-none fixed inset-0 z-0" />
-      <ConfettiSystem streak={gameState.streak} />
+      <ConfettiSystem streak={gameState.streak} isRichMode={isRichMode} />
       
       {/* Title Bar (Top Overlay) */}
       {gameState.activeTitle && (
@@ -890,7 +917,7 @@ const App: React.FC = () => {
             <div className="text-right">
                 <span className="text-[10px] uppercase tracking-widest text-noir-600 block mb-1">Funds</span>
                 <span className="text-4xl font-mono font-bold text-white tracking-tight drop-shadow-[0_0_10px_rgba(255,255,255,0.1)]">
-                    ${gameState.money.toLocaleString()}
+                    {formatMoney(gameState.money)}
                 </span>
             </div>
         </header>

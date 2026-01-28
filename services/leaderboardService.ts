@@ -14,6 +14,40 @@ const DEFAULT_BOARD: GlobalLeaderboard = {
   mommy: []
 };
 
+// --- Local Storage Helpers (Moved up to avoid TDZ) ---
+
+const getLocalBoard = (): GlobalLeaderboard => {
+    try {
+        const local = localStorage.getItem(LOCAL_STORAGE_KEY);
+        return local ? JSON.parse(local) : DEFAULT_BOARD;
+    } catch (e) {
+        return DEFAULT_BOARD;
+    }
+};
+
+const updateLocalBoardState = (board: GlobalLeaderboard, category: keyof GlobalLeaderboard, entry: LeaderboardEntry): GlobalLeaderboard => {
+    const list = board[category] || [];
+    const existingIndex = list.findIndex(e => e.name === entry.name);
+    
+    if (existingIndex >= 0) {
+        if (entry.score > list[existingIndex].score) {
+            list[existingIndex] = entry;
+        }
+    } else {
+        list.push(entry);
+    }
+    
+    list.sort((a, b) => b.score - a.score);
+    board[category] = list.slice(0, 20);
+    
+    try {
+        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(board));
+    } catch (e) {
+        console.error("Failed to save local leaderboard", e);
+    }
+    return board;
+}
+
 // Request Queue to prevent race conditions (Read-Modify-Write overlap)
 let requestQueue = Promise.resolve();
 
@@ -129,43 +163,33 @@ export const LeaderboardService = {
             return localBoard;
         }
       });
+  },
+
+  wipeCheaters: async (): Promise<void> => {
+      return enqueue(async () => {
+          try {
+              const currentBoard = await LeaderboardService.getLeaderboard();
+              let hasChanges = false;
+              
+              (['purist', 'prestige', 'rich', 'mommy'] as const).forEach(cat => {
+                  const initialLen = currentBoard[cat].length;
+                  const filtered = currentBoard[cat].filter(e => e.name !== 'cheater');
+                  if (filtered.length !== initialLen) {
+                      currentBoard[cat] = filtered;
+                      hasChanges = true;
+                  }
+              });
+
+              if (hasChanges) {
+                  await fetch(API_URL, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify(currentBoard)
+                  });
+              }
+          } catch (e) {
+              console.error("Failed to wipe cheaters", e);
+          }
+      });
   }
-};
-
-// --- Local Storage Fallback Helpers ---
-
-const getLocalBoard = (): GlobalLeaderboard => {
-    try {
-        const local = localStorage.getItem(LOCAL_STORAGE_KEY);
-        return local ? JSON.parse(local) : DEFAULT_BOARD;
-    } catch (e) {
-        return DEFAULT_BOARD;
-    }
-};
-
-const updateLocalBoardState = (board: GlobalLeaderboard, category: keyof GlobalLeaderboard, entry: LeaderboardEntry): GlobalLeaderboard => {
-    const list = board[category] || [];
-    const existingIndex = list.findIndex(e => e.name === entry.name);
-    
-    if (existingIndex >= 0) {
-        if (entry.score > list[existingIndex].score) {
-            list[existingIndex] = entry;
-        }
-    } else {
-        list.push(entry);
-    }
-    
-    list.sort((a, b) => b.score - a.score);
-    board[category] = list.slice(0, 20);
-    
-    try {
-        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(board));
-    } catch (e) {
-        console.error("Failed to save local leaderboard", e);
-    }
-    return board;
-}
-
-const updateLocalBoard = (category: keyof GlobalLeaderboard, entry: LeaderboardEntry): GlobalLeaderboard => {
-    return updateLocalBoardState(getLocalBoard(), category, entry);
 };
