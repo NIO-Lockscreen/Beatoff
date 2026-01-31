@@ -264,5 +264,38 @@ export const UPGRADES: Record<UpgradeType, UpgradeConfig> = {
     isPrestige: false, 
     getEffect: (level) => level > 0 ? 1 : 0,
     formatEffect: (val) => "???",
-  }
+  },
+  [UpgradeType.PRESTIGE_CARE_PACKAGE]: {
+    id: UpgradeType.PRESTIGE_CARE_PACKAGE,
+    name: "Care Package",
+    description: "Exchange $1M for 25 Void Fragments. One purchase per run.",
+    baseCost: 1000000,
+    costTiers: [1000000],
+    maxLevel: 1, // One-time purchase
+    isPrestige: false, // Dollar store
+    getEffect: (level) => 25,
+    formatEffect: (val) => `+25 VF`,
+  },
+  [UpgradeType.PRESTIGE_VETERAN]: {
+    id: UpgradeType.PRESTIGE_VETERAN,
+    name: "Veteran's Badge",
+    description: "Multiply gains by 10% of your Prestige Level.",
+    baseCost: 67,
+    costTiers: [67],
+    maxLevel: 1,
+    isPrestige: false,
+    getEffect: (level) => level > 0 ? 1 : 0,
+    formatEffect: (val) => val > 0 ? "ACTIVE" : "LOCKED",
+  },
+  [UpgradeType.HARD_MODE_BUFF]: {
+    id: UpgradeType.HARD_MODE_BUFF,
+    name: "Void Injection",
+    description: "One-time +20% probability boost for the NEXT flip only.",
+    baseCost: 5,
+    costTiers: [5],
+    maxLevel: 1, // Reset manually on flip
+    isPrestige: true,
+    getEffect: (level) => level > 0 ? 0.2 : 0,
+    formatEffect: (val) => val > 0 ? "ACTIVE" : "+20% (1 Flip)",
+  },
 };

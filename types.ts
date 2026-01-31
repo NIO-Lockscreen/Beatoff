@@ -21,6 +21,11 @@ export enum UpgradeType {
   PRESTIGE_GOLD_DIGGER = 'PRESTIGE_GOLD_DIGGER', // New Multiplier
   PRESTIGE_LIMITLESS = 'PRESTIGE_LIMITLESS', // Break all limits
   PRESTIGE_MOM = 'PRESTIGE_MOM', // The forbidden button
+  PRESTIGE_CARE_PACKAGE = 'PRESTIGE_CARE_PACKAGE', // Dollar store upgrade
+  PRESTIGE_VETERAN = 'PRESTIGE_VETERAN', // Unlocked after Hard Mode win
+  
+  // Hard Mode
+  HARD_MODE_BUFF = 'HARD_MODE_BUFF', // +20% for one flip
 }
 
 export interface UpgradeConfig {
@@ -44,6 +49,7 @@ export interface PlayerStats {
   highestCash: number;     // Highest cash ever held (at time of win)
   totalPrestiges: number;  // Total number of prestiges performed
   maxPrestigeLevel: number; // Highest prestige level reached (for leaderboard)
+  hardModeWins: number;    // Number of times Hard Mode was beaten
 }
 
 export interface Title {
@@ -68,6 +74,9 @@ export interface GameState {
   autoFlipEnabled: boolean; // Toggle for auto flippers
   autoBuyEnabled: boolean; // Toggle for auto buyer
   
+  // Hard Mode
+  isHardMode: boolean; // 70% Cap, 15 Streak goal
+  
   // UX
   seenUpgrades: UpgradeType[]; // List of upgrades user has scrolled to/seen
   
@@ -81,6 +90,7 @@ export interface GameState {
 }
 
 export const WINNING_STREAK = 10;
+export const HARD_MODE_WINNING_STREAK = 15;
 export const FRAGMENTS_PER_WIN = 5;
 
 // Leaderboard Types

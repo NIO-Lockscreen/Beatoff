@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { GameState, UpgradeType, WINNING_STREAK, FRAGMENTS_PER_WIN, PlayerStats, GlobalLeaderboard, LeaderboardEntry } from './types';
+import { GameState, UpgradeType, WINNING_STREAK, HARD_MODE_WINNING_STREAK, FRAGMENTS_PER_WIN, PlayerStats, GlobalLeaderboard, LeaderboardEntry } from './types';
 import { UPGRADES } from './constants';
 import Shop from './components/Shop';
 import ProbabilityModal from './components/ProbabilityModal';
@@ -7,19 +7,25 @@ import LeaderboardModal from './components/LeaderboardModal';
 import ConfettiSystem from './components/ConfettiSystem';
 import { AudioService } from './services/audioService';
 import { LeaderboardService } from './services/leaderboardService';
-import { HelpCircle, Trash2, Trophy, Volume2, VolumeX, Sparkles, AlertCircle, Heart, List, Crown } from 'lucide-react';
+import { HelpCircle, Trash2, Trophy, Volume2, VolumeX, Sparkles, AlertCircle, Heart, List, Crown, Skull, Syringe } from 'lucide-react';
 
 const CELEBRATION_MESSAGES = [
-  "", 
-  "", 
-  "LUCKY", 
-  "HEATING UP", 
-  "UNREAL", 
-  "DEFYING ODDS", 
-  "SYSTEM ERROR", 
-  "IMPOSSIBLE", 
-  "DESTINY", 
-  "Winner!!!"
+  "", // 0
+  "", // 1
+  "LUCKY", // 2
+  "HEATING UP", // 3
+  "UNREAL", // 4
+  "DEFYING ODDS", // 5
+  "SYSTEM ERROR", // 6
+  "IMPOSSIBLE", // 7
+  "DESTINY", // 8
+  "DIVINE", // 9
+  "Winner!!!", // 10
+  "BEYOND", // 11
+  "TRANSCENDENT", // 12
+  "OMNISCIENT", // 13
+  "THE END?", // 14
+  "VOID MASTER" // 15
 ];
 
 const COMPLIMENTS = [
@@ -41,6 +47,7 @@ const INITIAL_STATS: PlayerStats = {
     highestCash: 0,
     totalPrestiges: 0,
     maxPrestigeLevel: 0,
+    hardModeWins: 0,
 };
 
 const INITIAL_STATE: GameState = {
@@ -56,26 +63,27 @@ const INITIAL_STATE: GameState = {
     [UpgradeType.AUTO_FLIP]: 0,
     [UpgradeType.PASSIVE_INCOME]: 0,
     [UpgradeType.EDGING]: 0,
-    // Prestige Upgrades
     [UpgradeType.PRESTIGE_KARMA]: 0,
     [UpgradeType.PRESTIGE_FATE]: 0,
     [UpgradeType.PRESTIGE_FLUX]: 0,
     [UpgradeType.PRESTIGE_PASSIVE]: 0,
     [UpgradeType.PRESTIGE_AUTO]: 0,
-    [UpgradeType.PRESTIGE_AUTO_BUY]: 0, // New
+    [UpgradeType.PRESTIGE_AUTO_BUY]: 0, 
     [UpgradeType.PRESTIGE_EDGING]: 0,
     [UpgradeType.PRESTIGE_GOLD_DIGGER]: 0,
     [UpgradeType.PRESTIGE_LIMITLESS]: 0,
     [UpgradeType.PRESTIGE_MOM]: 0,
+    [UpgradeType.PRESTIGE_CARE_PACKAGE]: 0,
+    [UpgradeType.PRESTIGE_VETERAN]: 0,
+    [UpgradeType.HARD_MODE_BUFF]: 0,
   },
   history: [],
   prestigeLevel: 0,
   voidFragments: 0,
   autoFlipEnabled: true,
-  autoBuyEnabled: false, // New
-  seenUpgrades: [UpgradeType.CHANCE, UpgradeType.SPEED, UpgradeType.COMBO, UpgradeType.VALUE], // Base items always seen
-  
-  // New State
+  autoBuyEnabled: false,
+  isHardMode: false,
+  seenUpgrades: [UpgradeType.CHANCE, UpgradeType.SPEED, UpgradeType.COMBO, UpgradeType.VALUE], 
   playerName: null,
   stats: INITIAL_STATS,
   unlockedTitles: {},
@@ -88,7 +96,6 @@ const SAVE_KEY = 'beatTheOdds_save';
 const META_SAVE_KEY = 'beatTheOdds_meta';
 const SEEN_COMPLIMENTS_KEY = 'beatTheOdds_seen_compliments';
 
-// Priority Order for Auto Buy
 const AUTO_BUY_TARGETS = [
     UpgradeType.CHANCE,
     UpgradeType.SPEED,
@@ -99,7 +106,6 @@ const AUTO_BUY_TARGETS = [
     UpgradeType.AUTO_FLIP
 ];
 
-// --- SECURITY & SAVE SYSTEM ---
 const SALT = "VOID_SALT_8923_DO_NOT_TAMPER_WITH_FATE";
 
 const generateHash = (str: string) => {
@@ -108,12 +114,11 @@ const generateHash = (str: string) => {
     for (let i = 0; i < s.length; i++) {
         const char = s.charCodeAt(i);
         hash = ((hash << 5) - hash) + char;
-        hash |= 0; // Convert to 32bit integer
+        hash |= 0;
     }
     return hash.toString(16);
 };
 
-// Unicode-safe Base64 helpers
 const toBase64 = (str: string) => {
     try {
         return btoa(encodeURIComponent(str).replace(/%([0-9A-F]{2})/g, (match, p1) => 
@@ -145,43 +150,24 @@ const secureLoad = (key: string): any | null => {
     try {
         const raw = localStorage.getItem(key);
         if (!raw) return null;
-
-        // Legacy Check: If it's plain JSON (start with '{' and doesn't have 'd'/'h' structure check)
-        // We'll try to parse it. If it has 'd' and 'h', it's secure. If not, it's legacy.
         let parsed;
-        try {
-            parsed = JSON.parse(raw);
-        } catch { return null; }
-
+        try { parsed = JSON.parse(raw); } catch { return null; }
         if (parsed && typeof parsed.d === 'string' && typeof parsed.h === 'string') {
-            // New Secure Format
             const json = fromBase64(parsed.d);
             const calculatedHash = generateHash(json);
-            if (calculatedHash !== parsed.h) {
-                console.warn(`Tamper detected for ${key}. Resetting.`);
-                alert("Save file integrity check failed. Progress has been reset to prevent cheating.");
-                return null;
-            }
+            if (calculatedHash !== parsed.h) return null;
             return JSON.parse(json);
-        } else {
-            // Legacy Format (Migration)
-            console.log(`Migrating legacy save for ${key}...`);
-            return parsed;
-        }
-    } catch (e) {
-        console.error("Load failed", e);
-        return null;
-    }
+        } else { return parsed; }
+    } catch (e) { return null; }
 };
 
-
 const App: React.FC = () => {
-  
-  // --- Meta Data Management (Persistence across Resets) ---
   const getMetaStats = (): PlayerStats => {
       const loaded = secureLoad(META_SAVE_KEY);
       if (loaded) {
-          return { ...INITIAL_STATS, ...loaded };
+          const s = { ...INITIAL_STATS, ...loaded };
+          if (typeof s.hardModeWins === 'undefined') s.hardModeWins = 0;
+          return s;
       }
       return INITIAL_STATS;
   };
@@ -190,11 +176,9 @@ const App: React.FC = () => {
       secureSave(META_SAVE_KEY, stats);
   };
 
-  // --- State Initialization ---
   const [gameState, setGameState] = useState<GameState>(() => {
     const loaded = secureLoad(SAVE_KEY);
     if (loaded) {
-        // Migration for older saves that might miss new fields
         const defaults = INITIAL_STATE.upgrades;
         for (const key of Object.keys(defaults) as UpgradeType[]) {
              if (typeof loaded.upgrades[key] === 'undefined') {
@@ -205,6 +189,7 @@ const App: React.FC = () => {
         if (typeof loaded.voidFragments === 'undefined') loaded.voidFragments = 0;
         if (typeof loaded.autoFlipEnabled === 'undefined') loaded.autoFlipEnabled = true;
         if (typeof loaded.autoBuyEnabled === 'undefined') loaded.autoBuyEnabled = false;
+        if (typeof loaded.isHardMode === 'undefined') loaded.isHardMode = false;
         
         if (!loaded.seenUpgrades) {
             loaded.seenUpgrades = [UpgradeType.CHANCE, UpgradeType.SPEED, UpgradeType.COMBO, UpgradeType.VALUE];
@@ -216,7 +201,6 @@ const App: React.FC = () => {
             });
         }
         
-        // Load Meta Stats for Leaderboard Accuracy
         const metaStats = getMetaStats();
         loaded.stats = metaStats; 
 
@@ -226,8 +210,6 @@ const App: React.FC = () => {
 
         return loaded;
     }
-    
-    // If no save, load meta stats anyway
     const metaStats = getMetaStats();
     return { ...INITIAL_STATE, stats: metaStats };
   });
@@ -235,423 +217,61 @@ const App: React.FC = () => {
   const [isFlipping, setIsFlipping] = useState(false);
   const [coinSide, setCoinSide] = useState<'H' | 'T' | null>(null);
   const [showModal, setShowModal] = useState(false);
+  const [showProbability, setShowProbability] = useState(false);
   const [showLeaderboard, setShowLeaderboard] = useState(false);
   const [showMomModal, setShowMomModal] = useState<{show: boolean, text: string}>({show: false, text: ""});
+  const [showHardModePrompt, setShowHardModePrompt] = useState(false);
   const [hasWon, setHasWon] = useState(false);
   const [celebration, setCelebration] = useState<{text: string, level: number, id: number} | null>(null);
   const [muted, setMuted] = useState(true);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [showTitleSelector, setShowTitleSelector] = useState(false);
+  
+  const [isFundsVisible, setIsFundsVisible] = useState(true);
+  const headerFundsRef = useRef<HTMLDivElement>(null);
 
-  const flipTimeoutRef = useRef<number | null>(null);
-  const celebrationTimeoutRef = useRef<number | null>(null);
-  const deleteTimeoutRef = useRef<number | null>(null);
+  const flipTimeoutRef = useRef<number | undefined>(undefined);
+  const celebrationTimeoutRef = useRef<number | undefined>(undefined);
+  const deleteTimeoutRef = useRef<number | undefined>(undefined);
   const cheatCodeBuffer = useRef<string>("");
 
-  // --- Persistence ---
+  // Persistence
   useEffect(() => {
     secureSave(SAVE_KEY, gameState);
+    saveMetaStats(gameState.stats);
   }, [gameState]);
 
-  // --- Mute Sync ---
+  // Audio
   useEffect(() => {
-     AudioService.setMuted(muted);
+    AudioService.setMuted(muted);
   }, [muted]);
 
-  // --- Derived Values (Stats Calculation) ---
-  
-  const hasLimitless = (gameState.upgrades[UpgradeType.PRESTIGE_LIMITLESS] || 0) > 0;
-  const hasAlgorithmicGreed = (gameState.upgrades[UpgradeType.PRESTIGE_AUTO_BUY] || 0) > 0;
-
-  // 1. Calculate Base Values from Prestige
-  const prestigeKarmaMoney = UPGRADES[UpgradeType.PRESTIGE_KARMA].getEffect(gameState.upgrades[UpgradeType.PRESTIGE_KARMA] || 0);
-  const prestigeBaseChance = UPGRADES[UpgradeType.PRESTIGE_FATE].getEffect(gameState.upgrades[UpgradeType.PRESTIGE_FATE] || 0);
-  const prestigeSpeedReduc = UPGRADES[UpgradeType.PRESTIGE_FLUX].getEffect(gameState.upgrades[UpgradeType.PRESTIGE_FLUX] || 0);
-
-  // 2. Calculate Standard Upgrade Effects
-  const standardChanceAdd = UPGRADES[UpgradeType.CHANCE].getEffect(gameState.upgrades[UpgradeType.CHANCE]);
-  const standardSpeed = UPGRADES[UpgradeType.SPEED].getEffect(gameState.upgrades[UpgradeType.SPEED]); 
-  
-  // 3. Combine
-  const baseChance = 0.20 + prestigeBaseChance;
-  const currentChance = Math.min(0.99, baseChance + standardChanceAdd); // Hard cap at 99% logic
-  
-  // Speed calculation:
-  const rawSpeed = standardSpeed - prestigeSpeedReduc;
-  const minSpeed = hasLimitless ? 1 : 50;
-  const currentSpeed = Math.max(minSpeed, rawSpeed);
-
-  const currentCombo = UPGRADES[UpgradeType.COMBO].getEffect(gameState.upgrades[UpgradeType.COMBO]);
-  const currentBaseValue = UPGRADES[UpgradeType.VALUE].getEffect(gameState.upgrades[UpgradeType.VALUE]);
-  
-  const hasAutoFlip = (gameState.upgrades[UpgradeType.AUTO_FLIP] || 0) > 0 || 
-                      (gameState.upgrades[UpgradeType.PRESTIGE_AUTO] || 0) > 0;
-  
-  const prestigeMultiplier = 1 + (gameState.prestigeLevel * 0.1);
-
-  const isRichMode = (gameState.activeTitle === 'RICH' && gameState.money >= 1000000);
-
-  // --- Helper: Unlock Title ---
-  const unlockTitle = useCallback((titleId: string, level: number = 1) => {
-     setGameState(prev => {
-         const currentLevel = prev.unlockedTitles[titleId] || 0;
-         if (level > currentLevel) {
-             // New title or level up
-             if (!prev.activeTitle) {
-                 return {
-                     ...prev,
-                     unlockedTitles: { ...prev.unlockedTitles, [titleId]: level },
-                     activeTitle: titleId // Auto equip if none equipped
-                 };
-             }
-             return {
-                 ...prev,
-                 unlockedTitles: { ...prev.unlockedTitles, [titleId]: level }
-             };
-         }
-         return prev;
-     });
+  // Funds Visibility
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+        ([entry]) => setIsFundsVisible(entry.isIntersecting),
+        { threshold: 0.1 }
+    );
+    if (headerFundsRef.current) observer.observe(headerFundsRef.current);
+    return () => observer.disconnect();
   }, []);
 
-  // --- Logic Checks (Rich) ---
-  useEffect(() => {
-      if (gameState.money > 10000000) {
-          unlockTitle('RICH', 1);
-      }
-      // Removed automatic Highest Cash update. Now handled in handleFlip(win)
-  }, [gameState.money, unlockTitle]);
-
-  const formatMoney = (val: number) => {
-    if (val >= 1e33) return '$' + (val / 1e33).toFixed(2).replace(/\.00$/, '') + 'Dc';
-    if (val >= 1e30) return '$' + (val / 1e30).toFixed(2).replace(/\.00$/, '') + 'No';
-    if (val >= 1e27) return '$' + (val / 1e27).toFixed(2).replace(/\.00$/, '') + 'Oc';
-    if (val >= 1e24) return '$' + (val / 1e24).toFixed(2).replace(/\.00$/, '') + 'Sp';
-    if (val >= 1e21) return '$' + (val / 1e21).toFixed(2).replace(/\.00$/, '') + 'Sx';
-    if (val >= 1e18) return '$' + (val / 1e18).toFixed(2).replace(/\.00$/, '') + 'Qi';
-    if (val >= 1e15) return '$' + (val / 1e15).toFixed(2).replace(/\.00$/, '') + 'Qa';
-    if (val >= 1e12) return '$' + (val / 1e12).toFixed(2).replace(/\.00$/, '') + 'T';
-    if (val >= 1e9) return '$' + (val / 1e9).toFixed(2).replace(/\.00$/, '') + 'B';
-    if (val >= 1e6) return '$' + (val / 1e6).toFixed(2).replace(/\.00$/, '') + 'M';
-    return '$' + val.toLocaleString();
-  };
-  
-  // --- Actions ---
-
-  const handleFlip = useCallback((forceHeads: boolean = false, isAuto: boolean = false) => {
-    const isDebug = typeof forceHeads === 'boolean' && forceHeads === true;
-
-    // IMPORTANT: Stop auto flipping if we reached the win condition (streak >= 10)
-    if (gameState.streak >= 10 && !forceHeads && !hasWon) {
-        // Just let the last animation finish and trigger win
-    }
-
-    if (isFlipping || hasWon || showMomModal.show) return;
-
-    setIsFlipping(true);
-    // Audio throttle for high speeds
-    if (currentSpeed > 50) AudioService.playFlip();
-
-    const duration = currentSpeed;
-
-    flipTimeoutRef.current = window.setTimeout(() => {
-      let isHeads = Math.random() < currentChance;
+  const calculateChance = useCallback(() => {
+      const chanceLevel = gameState.upgrades[UpgradeType.CHANCE] || 0;
+      const fateLevel = gameState.upgrades[UpgradeType.PRESTIGE_FATE] || 0;
+      const buffActive = gameState.upgrades[UpgradeType.HARD_MODE_BUFF] > 0;
       
-      if (isDebug) isHeads = true;
+      let chance = 0.20 + (chanceLevel * 0.05) + (fateLevel * 0.025);
+      if (buffActive) chance += 0.2;
 
-      const result = isHeads ? 'H' : 'T';
-
-      setGameState(prev => {
-        const newStreak = isHeads ? prev.streak + 1 : 0;
-        
-        let earned = 0;
-        if (isHeads) {
-            earned = Math.floor(currentBaseValue * (newStreak > 1 ? (1 + (newStreak * (currentCombo - 1))) : 1));
-        } else {
-            const passiveLevel = prev.upgrades[UpgradeType.PASSIVE_INCOME] || 0;
-            const standardPassive = UPGRADES[UpgradeType.PASSIVE_INCOME].getEffect(passiveLevel) * (1 + prev.prestigeLevel);
-            const voidPassiveLevel = prev.upgrades[UpgradeType.PRESTIGE_PASSIVE] || 0;
-            const voidPassive = UPGRADES[UpgradeType.PRESTIGE_PASSIVE].getEffect(voidPassiveLevel);
-            if (standardPassive > 0 || voidPassive > 0) {
-                earned = standardPassive + voidPassive;
-            }
-        }
-        
-        const edgingLevel = prev.upgrades[UpgradeType.EDGING] || 0;
-        const voidEdgingLevel = prev.upgrades[UpgradeType.PRESTIGE_EDGING] || 0;
-        if (edgingLevel > 0 || voidEdgingLevel > 0) earned *= 10;
-
-        // Gold Digger Multiplier
-        const goldDiggerLevel = prev.upgrades[UpgradeType.PRESTIGE_GOLD_DIGGER] || 0;
-        const goldDiggerMulti = UPGRADES[UpgradeType.PRESTIGE_GOLD_DIGGER].getEffect(goldDiggerLevel);
-        if (goldDiggerMulti > 1) earned *= goldDiggerMulti;
-        
-        earned = Math.floor(earned * prestigeMultiplier);
-        
-        const newMaxStreak = Math.max(prev.maxStreak, newStreak);
-        const won = newStreak >= WINNING_STREAK;
-        const finalMoney = prev.money + earned;
-
-        // INVALIDATE PURIST RUN IF AUTO FLIP used
-        // Spec: "No autoflipper was used at any point during that run"
-        const nextIsPuristRun = isAuto ? false : prev.isPuristRun;
-
-        let nextStats = { ...prev.stats };
-        let nextTitles = { ...prev.unlockedTitles };
-        let nextActiveTitle = prev.activeTitle;
-
-        // --- WIN CONDITION HANDLER (STATE UPDATE) ---
-        if (won && !hasWon) {
-           // 1. PURIST LOGIC
-           // Only increment if we are still in a purist run
-           if (nextIsPuristRun) {
-               nextStats.puristWins += 1;
-               
-               // Unlock Title
-               nextTitles['PURIST'] = nextStats.puristWins;
-               if (!nextActiveTitle) nextActiveTitle = 'PURIST';
-           }
-
-           // 2. RICH LOGIC
-           // "Tracks the highest amount of cash held at the moment of round completion"
-           if (finalMoney > nextStats.highestCash) {
-               nextStats.highestCash = finalMoney;
-           }
-        }
-
-        if (isHeads) {
-             if (currentSpeed > 50 || newStreak % 10 === 0) {
-                 AudioService.playHeads(newStreak);
-             }
-            if (newStreak >= 2) {
-                if (celebrationTimeoutRef.current) window.clearTimeout(celebrationTimeoutRef.current);
-                let message = CELEBRATION_MESSAGES[Math.min(newStreak, CELEBRATION_MESSAGES.length - 1)] || "GODLIKE";
-                if (newStreak > 10) message = "OVERACHIEVER";
-                
-                const autoFlipOwned = (prev.upgrades[UpgradeType.AUTO_FLIP] || 0) > 0 || (prev.upgrades[UpgradeType.PRESTIGE_AUTO] || 0) > 0;
-                const passiveOwned = (prev.upgrades[UpgradeType.PASSIVE_INCOME] || 0) > 0 || (prev.upgrades[UpgradeType.PRESTIGE_PASSIVE] || 0) > 0;
-                const edgingOwned = (prev.upgrades[UpgradeType.EDGING] || 0) > 0 || (prev.upgrades[UpgradeType.PRESTIGE_EDGING] || 0) > 0;
-                const prestigeAutoOwned = (prev.upgrades[UpgradeType.PRESTIGE_AUTO] || 0) > 0;
-                const prestigeEdgingOwned = (prev.upgrades[UpgradeType.PRESTIGE_EDGING] || 0) > 0;
-
-                if (newStreak === 3 && prev.maxStreak < 3 && !passiveOwned) message = "PASSIVE INCOME UNLOCKED";
-                if (newStreak === 5 && prev.maxStreak < 5 && !autoFlipOwned && !prestigeAutoOwned) message = "AUTO FLIP UNLOCKED";
-                if (newStreak === 9 && prev.maxStreak < 9 && !edgingOwned && !prestigeEdgingOwned) message = "EDGING UNLOCKED";
-
-                setCelebration({ text: message, level: newStreak, id: Date.now() });
-                celebrationTimeoutRef.current = window.setTimeout(() => setCelebration(null), 2500) as unknown as number;
-            }
-        } else {
-             if (currentSpeed > 50) AudioService.playTails();
-        }
-
-        return {
-          ...prev,
-          money: finalMoney,
-          streak: newStreak,
-          maxStreak: newMaxStreak,
-          totalFlips: prev.totalFlips + 1,
-          history: [result as 'H'|'T', ...prev.history].slice(0, 10),
-          stats: nextStats,
-          unlockedTitles: nextTitles,
-          activeTitle: nextActiveTitle,
-          isPuristRun: nextIsPuristRun // Apply invalidation
-        };
-      });
-
-      setCoinSide(result);
-      setIsFlipping(false);
-    }, duration) as unknown as number;
-
-  }, [isFlipping, hasWon, currentChance, currentSpeed, currentBaseValue, currentCombo, prestigeMultiplier, showMomModal, gameState.streak]);
-
-  // --- Effect: Handle Win Side Effects (Once per run) ---
-  useEffect(() => {
-    if (gameState.streak >= 10 && !hasWon) {
-        setHasWon(true);
-        // Trigger Leaderboard / Name Entry
-        if (!gameState.playerName) {
-            setShowLeaderboard(true);
-        }
-
-        // Save Meta Data immediately on win
-        saveMetaStats(gameState.stats);
-
-        // Submit Leaderboard Scores
-        if (gameState.playerName) {
-            const name = gameState.hasCheated ? "cheater" : gameState.playerName;
-            const now = Date.now();
-            const title = gameState.activeTitle || undefined;
-            
-            const updates = [];
-            // We check the stats object which was updated in handleFlip
-            if (gameState.isPuristRun) {
-                updates.push({ category: 'purist', entry: { name, score: gameState.stats.puristWins, date: now, title } });
-            }
-            if (gameState.money >= gameState.stats.highestCash) {
-                updates.push({ category: 'rich', entry: { name, score: gameState.stats.highestCash, date: now, title } });
-            }
-            
-            // @ts-ignore
-            if (updates.length > 0) LeaderboardService.submitScores(updates);
-        }
-    }
-  }, [gameState.streak, hasWon, gameState.isPuristRun, gameState.money, gameState.stats, gameState.playerName, gameState.hasCheated, gameState.activeTitle]);
-
-
-  const triggerMomEvent = () => {
-      // Get seen list
-      let seen: string[] = [];
-      try {
-          const s = localStorage.getItem(SEEN_COMPLIMENTS_KEY);
-          if (s) seen = JSON.parse(s);
-      } catch (e) {
-          console.error(e);
-      }
-
-      const available = COMPLIMENTS.filter(c => !seen.includes(c));
-      const pool = available.length > 0 ? available : COMPLIMENTS;
-      const text = pool[Math.floor(Math.random() * pool.length)];
-
-      setShowMomModal({ show: true, text });
-      AudioService.playWin(); 
-  };
-
-  const handleMomConfirm = () => {
-      let seen: string[] = [];
-      try {
-          const s = localStorage.getItem(SEEN_COMPLIMENTS_KEY);
-          if (s) seen = JSON.parse(s);
-          if (!seen.includes(showMomModal.text)) {
-              seen.push(showMomModal.text);
-              localStorage.setItem(SEEN_COMPLIMENTS_KEY, JSON.stringify(seen));
-          }
-      } catch (e) { console.error(e); }
-
-      // Reset
-      localStorage.removeItem(SAVE_KEY); // Wipe game state
-      setShowMomModal({ show: false, text: "" });
+      const cap = gameState.isHardMode ? 0.70 : 0.99;
+      if (chance > cap) chance = cap;
+      if (gameState.upgrades[UpgradeType.PRESTIGE_LIMITLESS] > 0) chance = 0.99;
       
-      // Load Meta Stats (Survives Reset)
-      const metaStats = getMetaStats();
+      return Math.min(1.0, chance);
+  }, [gameState.upgrades, gameState.isHardMode]);
 
-      // Preserve Leaderboard Identity but reset run
-      const freshState = JSON.parse(JSON.stringify(INITIAL_STATE));
-      freshState.playerName = gameState.playerName;
-      freshState.stats = metaStats; // Restore meta stats
-      freshState.unlockedTitles = gameState.unlockedTitles; // Keep titles? Spec implies reset except MOM logic, but titles are tied to meta stats usually. Let's keep them.
-      freshState.activeTitle = gameState.activeTitle;
-      freshState.hasCheated = false; // RESET CHEATER FLAG ON RESET
-
-      setGameState(freshState);
-      setHasWon(false);
-      setCoinSide(null);
-      setCelebration(null);
-      window.location.reload(); 
-  };
-
-  const buyUpgrade = (type: UpgradeType, cost: number, isPrestige: boolean) => {
-    // Intercept "Your Mom" upgrade
-    if (type === UpgradeType.PRESTIGE_MOM) {
-        if (gameState.money >= cost) {
-            
-            // 4. MOMMY LOGIC
-            // Immediate meta-update before reset
-            const nextStats = { ...gameState.stats, momPurchases: gameState.stats.momPurchases + 1 };
-            saveMetaStats(nextStats);
-
-            setGameState(prev => {
-                // Unlock Title locally for visual continuity before reload
-                const nextTitles = { ...prev.unlockedTitles };
-                if (nextStats.momPurchases > 1) {
-                     nextTitles['MOMMY'] = nextStats.momPurchases;
-                }
-                return {
-                    ...prev,
-                    money: prev.money - cost,
-                    stats: nextStats,
-                    unlockedTitles: nextTitles
-                };
-            });
-            
-            // Trigger Leaderboard Update immediately for Mom Purchase
-            if (gameState.playerName) {
-                const name = gameState.hasCheated ? "cheater" : gameState.playerName;
-                const now = Date.now();
-                const title = gameState.activeTitle || undefined;
-                LeaderboardService.submitScores([
-                    { category: 'mommy', entry: { name, score: nextStats.momPurchases, date: now, title } },
-                ]);
-            }
-
-            triggerMomEvent();
-        }
-        return;
-    }
-
-    // SPECIAL CASE: Gold Digger is Prestige Category but Money Cost
-    if (type === UpgradeType.PRESTIGE_GOLD_DIGGER) {
-        if (gameState.money >= cost) {
-            setGameState(prev => ({
-                ...prev,
-                money: prev.money - cost,
-                upgrades: { ...prev.upgrades, [type]: (prev.upgrades[type] || 0) + 1 }
-            }));
-            AudioService.playFlip();
-        }
-        return;
-    }
-
-    if (isPrestige) {
-        if (gameState.voidFragments >= cost) {
-            setGameState((prev: GameState) => {
-                let extraMoney = 0;
-                if (type === UpgradeType.PRESTIGE_KARMA) {
-                    const currentLevel = (prev.upgrades[type] as number) || 0;
-                    const nextLevel = currentLevel + 1;
-                    const prevEffect = UPGRADES[type].getEffect(currentLevel);
-                    const nextEffect = UPGRADES[type].getEffect(nextLevel);
-                    extraMoney = nextEffect - prevEffect;
-                }
-
-                if (extraMoney > 0) AudioService.playFlip(); 
-
-                return {
-                    ...prev,
-                    voidFragments: prev.voidFragments - cost,
-                    money: prev.money + extraMoney,
-                    upgrades: { ...prev.upgrades, [type]: (prev.upgrades[type] || 0) + 1 }
-                };
-            });
-        }
-    } else {
-        if (gameState.money >= cost) {
-            setGameState(prev => ({
-                ...prev,
-                money: prev.money - cost,
-                upgrades: { ...prev.upgrades, [type]: (prev.upgrades[type] || 0) + 1 }
-            }));
-        }
-    }
-  };
-  
-  const handleUpgradeSeen = useCallback((id: UpgradeType) => {
-      setGameState(prev => {
-          if (prev.seenUpgrades.includes(id)) return prev;
-          return { ...prev, seenUpgrades: [...prev.seenUpgrades, id] };
-      });
-  }, []);
-
-  const hardReset = () => {
-    localStorage.removeItem(SAVE_KEY);
-    localStorage.removeItem(META_SAVE_KEY); // Full Wipe
-    setGameState(JSON.parse(JSON.stringify(INITIAL_STATE)));
-    setHasWon(false);
-    setCoinSide(null);
-    setCelebration(null);
-    setDeleteConfirm(false);
-  };
-
-  const ascend = () => {
+  const ascend = (forceHardMode: boolean = false) => {
       const karmaLevel = gameState.upgrades[UpgradeType.PRESTIGE_KARMA] || 0;
       const startMoney = UPGRADES[UpgradeType.PRESTIGE_KARMA].getEffect(karmaLevel);
 
@@ -665,18 +285,12 @@ const App: React.FC = () => {
           }
       });
 
-      // Fixed reward of 5 fragments per clear, removed prestige scaling
       const voidReward = FRAGMENTS_PER_WIN;
-
-      // Unlock Prestiger Title
       const newPrestigeLevel = gameState.prestigeLevel + 1;
       const nextTitles = { ...gameState.unlockedTitles };
-      if (newPrestigeLevel > 0) {
-          nextTitles['PRESTIGE'] = newPrestigeLevel;
-      }
+      if (newPrestigeLevel > 0) nextTitles['PRESTIGE'] = newPrestigeLevel;
+      if (forceHardMode || gameState.isHardMode) nextTitles['HARD_MAN'] = 1;
       
-      // 3. PRESTIGE LOGIC
-      // "Check if currentPrestige > prestigeLeaderboardMax"
       const nextStats = { 
           ...gameState.stats, 
           totalPrestiges: gameState.stats.totalPrestiges + 1,
@@ -692,32 +306,24 @@ const App: React.FC = () => {
           upgrades: prestigeUpgrades as Record<UpgradeType, number>,
           totalFlips: 0, 
           seenUpgrades: gameState.seenUpgrades,
-          // Preserve Identity
           playerName: gameState.playerName,
           stats: nextStats,
           unlockedTitles: nextTitles,
           activeTitle: gameState.activeTitle || (newPrestigeLevel === 1 ? 'PRESTIGE' : gameState.activeTitle),
-          isPuristRun: true, // Reset Purist run eligibility on new run
-          hasCheated: gameState.hasCheated, // Cheater status persists across prestige
-          autoFlipEnabled: gameState.autoFlipEnabled, // PRESERVE AUTOFLIP PREFERENCE
-          autoBuyEnabled: gameState.autoBuyEnabled // PRESERVE AUTOBUY PREFERENCE
+          isPuristRun: true,
+          hasCheated: gameState.hasCheated,
+          autoFlipEnabled: gameState.autoFlipEnabled,
+          autoBuyEnabled: gameState.autoBuyEnabled,
+          isHardMode: forceHardMode || gameState.isHardMode // Preserve or Force
       };
 
-      // Submit Scores ON ASCEND (New Game Start)
-      if (gameState.playerName) {
-          const name = gameState.hasCheated ? "cheater" : gameState.playerName;
+      if (gameState.playerName && !gameState.hasCheated) {
+          const name = gameState.playerName;
           const now = Date.now();
           const title = gameState.activeTitle || undefined;
-
-          // Only submit Prestige score if we beat the max (which we checked above, or if its a new max)
-          const updates: { category: keyof GlobalLeaderboard; entry: LeaderboardEntry }[] = [];
           
           if (newPrestigeLevel >= nextStats.maxPrestigeLevel) {
-               updates.push({ category: 'prestige', entry: { name, score: newPrestigeLevel, date: now, title } });
-          }
-          
-          if (updates.length > 0) {
-              LeaderboardService.submitScores(updates);
+               LeaderboardService.submitScores([{ category: 'prestige', entry: { name, score: newPrestigeLevel, date: now, title } }]);
           }
       }
 
@@ -727,55 +333,332 @@ const App: React.FC = () => {
       setCelebration(null);
   };
 
+  const enableHardMode = () => {
+      ascend(true);
+      setShowHardModePrompt(false);
+  };
+
+  const closeHardModePrompt = () => setShowHardModePrompt(false);
+
+  const handleFlip = useCallback((forceHeads: boolean = false, isAuto: boolean = false) => {
+    if (isFlipping || hasWon || showMomModal.show) return;
+    
+    setIsFlipping(true);
+    const speedLevel = gameState.upgrades[UpgradeType.SPEED] || 0;
+    const fluxLevel = gameState.upgrades[UpgradeType.PRESTIGE_FLUX] || 0;
+    const hasLimitless = (gameState.upgrades[UpgradeType.PRESTIGE_LIMITLESS] || 0) > 0;
+    
+    let duration = UPGRADES[UpgradeType.SPEED].getEffect(speedLevel);
+    duration = Math.max(hasLimitless ? 1 : 50, duration - (fluxLevel * 250));
+
+    if (duration > 50) AudioService.playFlip();
+
+    flipTimeoutRef.current = window.setTimeout(() => {
+        const chance = calculateChance();
+        const roll = Math.random();
+        const isHeads = forceHeads || roll < chance;
+        const result = isHeads ? 'H' : 'T';
+        
+        setCoinSide(result);
+
+        setGameState(prev => {
+            let newState = { ...prev, totalFlips: prev.totalFlips + 1 };
+            
+            // Consume buff if active
+            if (newState.upgrades[UpgradeType.HARD_MODE_BUFF] > 0) {
+                newState.upgrades[UpgradeType.HARD_MODE_BUFF] = 0;
+            }
+
+            // Invalidate Purist if Auto
+            if (isAuto) newState.isPuristRun = false;
+
+            if (isHeads) {
+                // WIN
+                const newStreak = prev.streak + 1;
+                if (duration > 50 || newStreak % 10 === 0) AudioService.playHeads(newStreak);
+                
+                const comboLevel = prev.upgrades[UpgradeType.COMBO] || 0;
+                const valueLevel = prev.upgrades[UpgradeType.VALUE] || 0;
+                const edgingLevel = prev.upgrades[UpgradeType.EDGING] || 0;
+                const pEdgingLevel = prev.upgrades[UpgradeType.PRESTIGE_EDGING] || 0;
+                const goldDiggerLevel = prev.upgrades[UpgradeType.PRESTIGE_GOLD_DIGGER] || 0;
+                const veteranLevel = prev.upgrades[UpgradeType.PRESTIGE_VETERAN] || 0;
+
+                let baseVal = UPGRADES[UpgradeType.VALUE].getEffect(valueLevel);
+                let comboMult = UPGRADES[UpgradeType.COMBO].getEffect(comboLevel);
+                if (newStreak > 1) baseVal *= (1 + (newStreak * (comboMult - 1))); // Adjusted formula to match logic
+
+                let multiplier = 1;
+                if (edgingLevel > 0) multiplier *= 10;
+                if (pEdgingLevel > 0) multiplier *= 10;
+                if (goldDiggerLevel > 0) multiplier *= UPGRADES[UpgradeType.PRESTIGE_GOLD_DIGGER].getEffect(goldDiggerLevel);
+                
+                // Veteran Badge Multiplier (10% per Prestige Level)
+                if (veteranLevel > 0) {
+                    multiplier *= Math.max(1, 1 + (prev.prestigeLevel * 0.10));
+                }
+                
+                // Hard Mode Multiplier
+                if (prev.isHardMode) multiplier *= 10;
+                
+                const prestigeMult = 1 + (prev.prestigeLevel * 0.1);
+                const gain = Math.floor(baseVal * multiplier * prestigeMult);
+                
+                newState.money += gain;
+                newState.streak = newStreak;
+                newState.maxStreak = Math.max(prev.maxStreak, newStreak);
+                newState.stats.highestCash = Math.max(newState.stats.highestCash, newState.money);
+                newState.history = ['H', ...prev.history].slice(0, 10) as ('H'|'T')[];
+                
+                // Hard Mode Void Fragments Reward every 10 wins
+                if (prev.isHardMode && newStreak % 10 === 0) {
+                    newState.voidFragments += 5;
+                }
+                
+                // Celebration
+                if (newStreak >= 2) {
+                    if (celebrationTimeoutRef.current) window.clearTimeout(celebrationTimeoutRef.current);
+                    let message = CELEBRATION_MESSAGES[Math.min(newStreak, CELEBRATION_MESSAGES.length - 1)] || "GODLIKE";
+                    setCelebration({ text: message, level: newStreak, id: Date.now() });
+                    celebrationTimeoutRef.current = window.setTimeout(() => setCelebration(null), 2500);
+                }
+
+                if (prev.activeTitle === 'RICH' && newState.money >= 1000000) {
+                     // handled in unlock logic usually
+                }
+
+            } else {
+                // LOSS
+                if (duration > 50) AudioService.playTails();
+                newState.streak = 0;
+                newState.history = ['T', ...prev.history].slice(0, 10) as ('H'|'T')[];
+                
+                // Passive Income
+                const passiveLevel = prev.upgrades[UpgradeType.PASSIVE_INCOME] || 0;
+                const voidSiphonLevel = prev.upgrades[UpgradeType.PRESTIGE_PASSIVE] || 0;
+                
+                let passiveGain = 0;
+                if (passiveLevel > 0) {
+                     passiveGain += UPGRADES[UpgradeType.PASSIVE_INCOME].getEffect(passiveLevel) * (1 + prev.prestigeLevel);
+                }
+                if (voidSiphonLevel > 0) {
+                     passiveGain += UPGRADES[UpgradeType.PRESTIGE_PASSIVE].getEffect(voidSiphonLevel);
+                }
+                
+                // Edging applies to passive? Usually no, but let's leave it simple
+                const edgingLevel = prev.upgrades[UpgradeType.EDGING] || 0;
+                const pEdgingLevel = prev.upgrades[UpgradeType.PRESTIGE_EDGING] || 0;
+                if (edgingLevel > 0 || pEdgingLevel > 0) passiveGain *= 10;
+                if (prev.isHardMode) passiveGain *= 10;
+
+                if (passiveGain > 0) {
+                    newState.money += passiveGain;
+                }
+            }
+            return newState;
+        });
+        
+        setIsFlipping(false);
+    }, duration);
+
+  }, [isFlipping, hasWon, showMomModal, calculateChance, gameState.upgrades, gameState.prestigeLevel, gameState.isHardMode]);
+
+  // Win Detection
+  useEffect(() => {
+    const goal = gameState.isHardMode ? HARD_MODE_WINNING_STREAK : WINNING_STREAK;
+    if (gameState.streak >= goal && !hasWon) {
+        setHasWon(true);
+        setGameState(prev => {
+             const newStats = { ...prev.stats };
+             if (prev.isHardMode) newStats.hardModeWins++;
+             return { ...prev, stats: newStats };
+        });
+        
+        saveMetaStats(gameState.stats);
+        
+        // Auto-Trigger Hard Mode Prompt on Win if eligible (Level 50)
+        if (gameState.prestigeLevel >= 50 && !gameState.isHardMode) {
+            setShowHardModePrompt(true);
+        }
+
+        if (gameState.playerName && !gameState.hasCheated) {
+             const updates = [];
+             if (gameState.isPuristRun) updates.push({ category: 'purist', entry: { name: gameState.playerName, score: gameState.stats.puristWins + 1, date: Date.now() } });
+             updates.push({ category: 'rich', entry: { name: gameState.playerName, score: gameState.stats.highestCash, date: Date.now() } });
+             
+             // @ts-ignore
+             if (updates.length > 0) LeaderboardService.submitScores(updates);
+        }
+    }
+  }, [gameState.streak, hasWon, gameState.isHardMode, gameState.prestigeLevel, gameState.playerName, gameState.hasCheated, gameState.isPuristRun, gameState.stats]);
+
+
+  // Auto Flip
+  useEffect(() => {
+    const hasAuto = gameState.upgrades[UpgradeType.AUTO_FLIP] > 0 || gameState.upgrades[UpgradeType.PRESTIGE_AUTO] > 0;
+    const goal = gameState.isHardMode ? HARD_MODE_WINNING_STREAK : WINNING_STREAK;
+    
+    if (gameState.autoFlipEnabled && hasAuto && !isFlipping && !hasWon && gameState.streak < goal && !showMomModal.show) {
+        const timer = window.setTimeout(() => handleFlip(false, true), 100);
+        return () => window.clearTimeout(timer);
+    }
+  }, [gameState.autoFlipEnabled, isFlipping, hasWon, gameState.streak, gameState.isHardMode, gameState.upgrades, handleFlip, showMomModal]);
+
+  // Auto Buy
+  useEffect(() => {
+    if (gameState.autoBuyEnabled && gameState.upgrades[UpgradeType.PRESTIGE_AUTO_BUY] > 0) {
+        const interval = window.setInterval(() => {
+            setGameState(prev => {
+                if (prev.money <= 0 || prev.streak >= (prev.isHardMode ? HARD_MODE_WINNING_STREAK : WINNING_STREAK)) return prev;
+                let newState = { ...prev };
+                let bought = false;
+                let updatedSeen = [...prev.seenUpgrades];
+                
+                for (const type of AUTO_BUY_TARGETS) {
+                    const upgrade = UPGRADES[type];
+                    const currentLevel = prev.upgrades[type] || 0;
+                    
+                    const hasLimitless = (prev.upgrades[UpgradeType.PRESTIGE_LIMITLESS] || 0) > 0;
+                    const maxLevel = (hasLimitless && upgrade.limitlessMaxLevel) ? upgrade.limitlessMaxLevel : upgrade.maxLevel;
+                    
+                    if (currentLevel >= maxLevel) continue;
+                    
+                    // Logic checks for unlocks (simplified)
+                    if (type === UpgradeType.PASSIVE_INCOME && currentLevel === 0 && prev.maxStreak < 3 && prev.prestigeLevel < 1) continue;
+                    if (type === UpgradeType.AUTO_FLIP && currentLevel === 0 && prev.maxStreak < 5 && prev.prestigeLevel < 1 && !prev.upgrades[UpgradeType.PRESTIGE_AUTO]) continue;
+
+                    const cost = upgrade.costTiers[currentLevel] || upgrade.costTiers[upgrade.costTiers.length - 1];
+                    if (newState.money >= cost) {
+                        newState.money -= cost;
+                        newState.upgrades[type] = currentLevel + 1;
+                        if (!updatedSeen.includes(type)) updatedSeen.push(type);
+                        bought = true;
+                    }
+                }
+                if (bought) newState.seenUpgrades = updatedSeen;
+                return bought ? newState : prev;
+            });
+        }, 1000);
+        return () => window.clearInterval(interval);
+    }
+  }, [gameState.autoBuyEnabled, gameState.upgrades]);
+
+  const handleBuy = (id: UpgradeType, cost: number, isPrestige: boolean) => {
+      setGameState(prev => {
+          if (id === UpgradeType.PRESTIGE_CARE_PACKAGE) {
+             if (prev.money < cost) return prev;
+             const newState = { ...prev };
+             newState.money -= cost;
+             newState.voidFragments += 25;
+             newState.upgrades[id] = (prev.upgrades[id] || 0) + 1;
+             AudioService.playFlip();
+             return newState;
+          }
+
+          if (isPrestige && id !== UpgradeType.PRESTIGE_GOLD_DIGGER) {
+              if (prev.voidFragments < cost) return prev;
+          } else {
+              if (prev.money < cost) return prev;
+          }
+
+          const newState = { ...prev };
+          if (isPrestige) {
+               if (id === UpgradeType.PRESTIGE_GOLD_DIGGER) {
+                   if (prev.money < cost) return prev;
+                   newState.money -= cost;
+               } else {
+                   newState.voidFragments -= cost;
+               }
+          } else {
+              newState.money -= cost;
+          }
+          
+          // Karma check
+          if (id === UpgradeType.PRESTIGE_KARMA) {
+             const oldVal = UPGRADES[id].getEffect(prev.upgrades[id] || 0);
+             const newVal = UPGRADES[id].getEffect((prev.upgrades[id] || 0) + 1);
+             newState.money += (newVal - oldVal);
+          }
+
+          newState.upgrades[id] = (prev.upgrades[id] || 0) + 1;
+          
+          if (id === UpgradeType.PRESTIGE_MOM) {
+              newState.stats.momPurchases++;
+          }
+          
+          return newState;
+      });
+      
+      if (id === UpgradeType.PRESTIGE_MOM) triggerMomEvent();
+  };
+
+  const triggerMomEvent = () => {
+      let seen: string[] = [];
+      try {
+          const s = localStorage.getItem(SEEN_COMPLIMENTS_KEY);
+          if (s) seen = JSON.parse(s);
+      } catch (e) { console.error(e); }
+
+      const available = COMPLIMENTS.filter(c => !seen.includes(c));
+      const pool = available.length > 0 ? available : COMPLIMENTS;
+      const text = pool[Math.floor(Math.random() * pool.length)];
+
+      setShowMomModal({ show: true, text });
+      AudioService.playWin(); 
+  };
+
+  const handleMomConfirm = () => {
+      // ... same as before
+      let seen: string[] = [];
+      try {
+          const s = localStorage.getItem(SEEN_COMPLIMENTS_KEY);
+          if (s) seen = JSON.parse(s);
+          if (!seen.includes(showMomModal.text)) {
+              seen.push(showMomModal.text);
+              localStorage.setItem(SEEN_COMPLIMENTS_KEY, JSON.stringify(seen));
+          }
+      } catch (e) { console.error(e); }
+
+      localStorage.removeItem(SAVE_KEY); 
+      setShowMomModal({ show: false, text: "" });
+      window.location.reload(); 
+  };
+
+  const toggleAutoFlip = () => setGameState(p => ({ ...p, autoFlipEnabled: !p.autoFlipEnabled }));
+  const toggleAutoBuy = () => setGameState(p => ({ ...p, autoBuyEnabled: !p.autoBuyEnabled }));
+  const handleSeen = (id: UpgradeType) => {
+      if (!gameState.seenUpgrades.includes(id)) {
+          setGameState(p => ({ ...p, seenUpgrades: [...p.seenUpgrades, id] }));
+      }
+  };
+
   const registerName = (name: string) => {
-      // WIPE CHEATERS COMMAND
       if (name.toLowerCase() === "cheater") {
-          LeaderboardService.wipeCheaters().finally(() => {
-              setGameState(prev => ({ ...prev, playerName: "cheater" }));
-          });
+          LeaderboardService.wipeCheaters().finally(() => setGameState(p => ({ ...p, playerName: "cheater" })));
           return;
       }
-
-      // Force "cheater" if flag is set
-      const finalName = gameState.hasCheated ? "cheater" : name;
-      
-      setGameState(prev => ({ ...prev, playerName: finalName }));
-      
-      const updates: { category: keyof GlobalLeaderboard; entry: LeaderboardEntry }[] = [];
-      const now = Date.now();
-      const title = gameState.activeTitle || undefined;
-
-      // When registering name, submit everything we have so far
-      // Note: prestigeLevel is current level.
-      if (gameState.stats.highestCash > 0) {
-          updates.push({ category: 'rich', entry: { name: finalName, score: gameState.stats.highestCash, date: now, title }});
+      if (gameState.hasCheated) {
+          setGameState(p => ({ ...p, playerName: "cheater" }));
+          return;
       }
-      
-      if (gameState.stats.puristWins > 0) {
-          updates.push({ category: 'purist', entry: { name: finalName, score: gameState.stats.puristWins, date: now, title }});
-      }
-      
-      // FIXED: Use maxPrestigeLevel for leaderboard instead of current run level
-      const bestPrestige = Math.max(gameState.prestigeLevel, gameState.stats.maxPrestigeLevel);
-      if (bestPrestige > 0) {
-          updates.push({ category: 'prestige', entry: { name: finalName, score: bestPrestige, date: now, title }});
-      }
-      
-      if (gameState.stats.momPurchases > 0) {
-          updates.push({ category: 'mommy', entry: { name: finalName, score: gameState.stats.momPurchases, date: now, title }});
-      }
-      
-      if (updates.length > 0) {
-          LeaderboardService.submitScores(updates);
-      }
+      setGameState(p => ({ ...p, playerName: name }));
+      const updates = [];
+      if (gameState.stats.highestCash > 0) updates.push({ category: 'rich', entry: { name, score: gameState.stats.highestCash, date: Date.now() }});
+      if (gameState.stats.puristWins > 0) updates.push({ category: 'purist', entry: { name, score: gameState.stats.puristWins, date: Date.now() }});
+      const bestP = Math.max(gameState.prestigeLevel, gameState.stats.maxPrestigeLevel);
+      if (bestP > 0) updates.push({ category: 'prestige', entry: { name, score: bestP, date: Date.now() }});
+      // @ts-ignore
+      if (updates.length > 0) LeaderboardService.submitScores(updates);
   };
 
   const handleDeleteClick = () => {
     if (deleteConfirm) {
-        hardReset();
+        localStorage.removeItem(SAVE_KEY);
+        localStorage.removeItem(META_SAVE_KEY);
+        window.location.reload();
     } else {
         setDeleteConfirm(true);
-        deleteTimeoutRef.current = window.setTimeout(() => setDeleteConfirm(false), 3000) as unknown as number;
+        deleteTimeoutRef.current = window.setTimeout(() => setDeleteConfirm(false), 3000);
     }
   };
 
@@ -783,58 +666,16 @@ const App: React.FC = () => {
       const newMuted = AudioService.toggleMute();
       setMuted(newMuted);
   };
-  
-  const toggleAutoFlip = () => {
-      setGameState(prev => ({
-          ...prev,
-          autoFlipEnabled: !prev.autoFlipEnabled,
-          // Toggling OFF does not invalidate run. Only triggering 'isAuto' flip does.
-      }));
-  };
 
-  const toggleAutoBuy = () => {
-      setGameState(prev => ({
-          ...prev,
-          autoBuyEnabled: !prev.autoBuyEnabled
-      }));
-  };
-  
-  // --- Keyboard Shortcuts ---
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-        // Anti-Cheat: Don't trigger cheats OR flag as cheater if user is typing in an input (e.g. name field)
-        const target = e.target as HTMLElement;
-        if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return;
-
-        if (e.code === 'Space') {
-            e.preventDefault(); 
-            handleFlip(false);
-        }
-        // DEBUG KEYS (Triggers Cheater Flag)
-        if (e.code === 'KeyQ') {
-            handleFlip(true); 
-            setGameState(prev => ({ 
-                ...prev, 
-                voidFragments: prev.voidFragments + 5,
-                hasCheated: true 
-            }));
-        }
-        if (e.code === 'KeyZ') {
-            setGameState(prev => ({ 
-                ...prev, 
-                money: prev.money + 10000,
-                hasCheated: true
-            }));
-        }
-
-        // HIDDEN CODE: ZEX (+5 Prestige)
+        if ((e.target as HTMLElement).tagName === 'INPUT') return;
+        if (e.code === 'Space') { e.preventDefault(); handleFlip(false); }
+        if (e.code === 'KeyQ') { handleFlip(true); setGameState(p => ({ ...p, hasCheated: true, voidFragments: p.voidFragments + 5 })); }
         if (e.key) {
            cheatCodeBuffer.current = (cheatCodeBuffer.current + e.key).toUpperCase().slice(-3);
            if (cheatCodeBuffer.current === "ZEX") {
-               setGameState((prev: GameState) => ({
-                   ...prev,
-                   prestigeLevel: (prev.prestigeLevel as number) + 5
-               }));
+               setGameState(p => ({ ...p, prestigeLevel: 199, hasCheated: true }));
                AudioService.playWin();
                cheatCodeBuffer.current = "";
            }
@@ -844,172 +685,79 @@ const App: React.FC = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [handleFlip]);
 
-
-  // --- Auto Flip Effect ---
   useEffect(() => {
-    let timer: number;
-    const shouldAutoFlip = hasAutoFlip && gameState.autoFlipEnabled && gameState.streak < 10;
-    
-    if (shouldAutoFlip && !isFlipping && !hasWon && !showMomModal.show) {
-        // CALL handleFlip with isAuto = true
-        timer = window.setTimeout(() => handleFlip(false, true), 300) as unknown as number;
-    }
-    return () => { if (timer) window.clearTimeout(timer); };
-  }, [hasAutoFlip, isFlipping, hasWon, handleFlip, showMomModal, gameState.autoFlipEnabled, gameState.streak]);
-
-  // --- Auto Flip Failsafe ---
-  useEffect(() => {
-      const failsafeInterval = window.setInterval(() => {
-          const shouldAutoFlip = hasAutoFlip && gameState.autoFlipEnabled && gameState.streak < 10;
-          if (shouldAutoFlip && !isFlipping && !hasWon && !showMomModal.show) {
-              // CALL handleFlip with isAuto = true
-              handleFlip(false, true);
-          }
-      }, 2000) as unknown as number; 
-      return () => window.clearInterval(failsafeInterval);
-  }, [hasAutoFlip, gameState.autoFlipEnabled, gameState.streak, isFlipping, hasWon, showMomModal, handleFlip]);
-
-
-  // --- Auto Buy Effect (Algorithmic Greed) ---
-  useEffect(() => {
-      if (!hasAlgorithmicGreed || !gameState.autoBuyEnabled) return;
-
-      const interval = setInterval(() => {
-          setGameState(prev => {
-              if (prev.streak >= 10 || prev.money <= 0) return prev; // Stop if won or broke
-
-              let currentMoney = prev.money;
-              let updatedUpgrades = { ...prev.upgrades };
-              let updatedSeen = [...prev.seenUpgrades];
-              let madePurchase = false;
-
-              const hasPhantomHand = (updatedUpgrades[UpgradeType.PRESTIGE_AUTO] || 0) > 0;
-              const hasPrestigeEdging = (updatedUpgrades[UpgradeType.PRESTIGE_EDGING] || 0) > 0;
-
-              // Check specific upgrades in order
-              for (const upgradeId of AUTO_BUY_TARGETS) {
-                  const config = UPGRADES[upgradeId];
-                  const currentLevel = updatedUpgrades[upgradeId] || 0;
-                  
-                  const hasLimitless = (updatedUpgrades[UpgradeType.PRESTIGE_LIMITLESS] || 0) > 0;
-                  const maxLevel = (hasLimitless && config.limitlessMaxLevel) 
-                        ? config.limitlessMaxLevel 
-                        : config.maxLevel;
-
-                  // Skip if maxed
-                  if (currentLevel >= maxLevel) continue;
-
-                  // Special Unlock Logic (Match Shop.tsx logic roughly)
-                  // Standard items unlock if: Owned OR (Streak Threshold Met OR Prestige >= 1)
-                  
-                  if (upgradeId === UpgradeType.PASSIVE_INCOME) {
-                      if (currentLevel === 0 && prev.maxStreak < 3 && prev.prestigeLevel < 1) continue;
-                  }
-
-                  if (upgradeId === UpgradeType.AUTO_FLIP) {
-                      if (hasPhantomHand) continue; // Skip if Phantom Hand owned (it's hidden in shop)
-                      if (currentLevel === 0 && prev.maxStreak < 5 && prev.prestigeLevel < 1) continue;
-                  }
-
-                  if (upgradeId === UpgradeType.EDGING) {
-                      if (hasPrestigeEdging) continue; // Skip if Prestige Edging owned
-                      if (currentLevel === 0 && prev.maxStreak < 9) continue;
-                  }
-
-                  const cost = config.costTiers[currentLevel] || config.costTiers[config.costTiers.length - 1];
-
-                  if (currentMoney >= cost) {
-                      currentMoney -= cost;
-                      updatedUpgrades[upgradeId] = currentLevel + 1;
-                      madePurchase = true;
-                      
-                      if (!updatedSeen.includes(upgradeId)) updatedSeen.push(upgradeId);
-                  }
-              }
-
-              if (madePurchase) {
-                  return {
-                      ...prev,
-                      money: currentMoney,
-                      upgrades: updatedUpgrades,
-                      seenUpgrades: updatedSeen
-                  };
-              }
-              return prev;
-          });
-      }, 1000); // Run every second
-
-      return () => clearInterval(interval);
-  }, [hasAlgorithmicGreed, gameState.autoBuyEnabled]);
-
-  useEffect(() => {
-    return () => {
-      if (flipTimeoutRef.current !== null) window.clearTimeout(flipTimeoutRef.current);
-      if (celebrationTimeoutRef.current !== null) window.clearTimeout(celebrationTimeoutRef.current);
-      if (deleteTimeoutRef.current !== null) window.clearTimeout(deleteTimeoutRef.current);
-    };
+      return () => {
+          window.clearTimeout(flipTimeoutRef.current);
+          window.clearTimeout(celebrationTimeoutRef.current);
+          window.clearTimeout(deleteTimeoutRef.current);
+      };
   }, []);
+
+  const formatMoney = (val: number) => {
+    if (val >= 1e33) return '$' + (val / 1e33).toFixed(2).replace(/\.00$/, '') + 'Dc';
+    if (val >= 1e30) return '$' + (val / 1e30).toFixed(2).replace(/\.00$/, '') + 'No';
+    if (val >= 1e27) return '$' + (val / 1e27).toFixed(2).replace(/\.00$/, '') + 'Oc';
+    if (val >= 1e24) return '$' + (val / 1e24).toFixed(2).replace(/\.00$/, '') + 'Sp';
+    if (val >= 1e21) return '$' + (val / 1e21).toFixed(2).replace(/\.00$/, '') + 'Sx';
+    if (val >= 1e18) return '$' + (val / 1e18).toFixed(2).replace(/\.00$/, '') + 'Qi';
+    if (val >= 1e15) return '$' + (val / 1e15).toFixed(2).replace(/\.00$/, '') + 'Qa';
+    if (val >= 1e12) return '$' + (val / 1e12).toFixed(2).replace(/\.00$/, '') + 'T';
+    if (val >= 1e9) return '$' + (val / 1e9).toFixed(2).replace(/\.00$/, '') + 'B';
+    if (val >= 1e6) return '$' + (val / 1e6).toFixed(2).replace(/\.00$/, '') + 'M';
+    return '$' + val.toLocaleString();
+  };
 
   const getTitleDisplay = (key: string, level: number) => {
       let suffix = level > 1 ? ` x${level}` : '';
-      if (key === 'PURIST') return `Purist${suffix}`;
-      if (key === 'PRESTIGE') return `Prestiger${suffix}`;
-      if (key === 'RICH') return `High Roller${suffix}`;
-      if (key === 'MOMMY') return `Mommy Lover${suffix}`;
-      return key;
+      const map: Record<string, string> = { 'PURIST': 'Purist', 'PRESTIGE': 'Prestiger', 'RICH': 'High Roller', 'MOMMY': 'Mommy Lover', 'HARD_MAN': 'Hard-Man' };
+      return (map[key] || key) + suffix;
   };
 
   return (
-    <div className={`min-h-screen md:h-screen md:overflow-hidden overflow-y-auto bg-noir-950 text-noir-200 font-sans selection:bg-amber-900 selection:text-white flex flex-col md:flex-row relative transition-colors duration-200 ${celebration && celebration.level >= 8 ? 'bg-noir-900' : ''}`}>
+    <div className={`min-h-screen md:h-screen md:overflow-hidden overflow-y-auto bg-noir-950 text-noir-200 font-sans flex flex-col md:flex-row relative transition-colors duration-200 ${celebration && celebration.level >= 8 ? 'bg-noir-900' : ''}`}>
       
-      {/* Visual Overlays */}
       <div className="bg-noise pointer-events-none fixed inset-0 z-0" />
       <div className="bg-vignette pointer-events-none fixed inset-0 z-0" />
-      <ConfettiSystem 
-        streak={gameState.streak} 
-        isRichMode={isRichMode} 
-        activeTitle={gameState.activeTitle}
-        momPurchases={gameState.stats.momPurchases}
-      />
+      <ConfettiSystem streak={gameState.streak} isRichMode={gameState.money > 1e6 && gameState.activeTitle === 'RICH'} activeTitle={gameState.activeTitle} momPurchases={gameState.stats.momPurchases} />
       
-      {/* Title Bar (Top Overlay) */}
+      {/* Title Bar */}
       {gameState.activeTitle && (
-          <div 
-            onClick={() => setShowTitleSelector(true)}
-            className="fixed top-4 left-1/2 -translate-x-1/2 z-[60] cursor-pointer group"
-          >
+          <div onClick={() => setShowTitleSelector(true)} className={`fixed md:top-4 top-28 left-1/2 -translate-x-1/2 z-[60] cursor-pointer group transition-opacity duration-300 ${!isFundsVisible ? 'opacity-0 pointer-events-none md:opacity-100 md:pointer-events-auto' : 'opacity-100'}`}>
               <div className="flex items-center gap-2 px-3 py-1 bg-noir-900/80 border border-amber-500/30 rounded-full backdrop-blur hover:bg-noir-800 transition-all shadow-[0_0_10px_rgba(245,158,11,0.1)]">
                   <Crown size={12} className="text-amber-500" />
-                  <span className="text-xs font-mono font-bold text-amber-200 tracking-widest uppercase">
-                    {getTitleDisplay(gameState.activeTitle, gameState.unlockedTitles[gameState.activeTitle] || 1)}
-                  </span>
+                  <span className="text-xs font-mono font-bold text-amber-200 tracking-widest uppercase">{getTitleDisplay(gameState.activeTitle, gameState.unlockedTitles[gameState.activeTitle] || 1)}</span>
                   {gameState.playerName && <span className="text-xs text-noir-500 font-mono">| {gameState.hasCheated ? "cheater" : gameState.playerName}</span>}
               </div>
           </div>
       )}
 
-      {/* Title Selector Modal */}
+      {/* Hard Mode Indicator */}
+      {gameState.isHardMode && (
+          <div className="fixed top-20 left-4 z-50 pointer-events-none">
+              <div className="flex items-center gap-2 text-red-500 font-mono text-xs font-bold border border-red-900/50 bg-red-950/20 px-2 py-1 rounded animate-pulse-slow">
+                  <Skull size={14} /> HARD MODE
+              </div>
+          </div>
+      )}
+
+      {/* Floating Funds */}
+      {!isFundsVisible && (
+        <div className="fixed top-4 right-4 z-[70] md:hidden animate-fade-in pointer-events-none">
+             <div className="px-4 py-2 bg-noir-900/90 border border-amber-500/40 rounded-full shadow-[0_4px_20px_rgba(0,0,0,0.5)] backdrop-blur-md flex items-center gap-2">
+                <span className="text-[10px] text-noir-400 font-mono uppercase tracking-widest">Funds</span>
+                <span className="text-amber-400 font-mono font-bold text-sm">{formatMoney(gameState.money)}</span>
+            </div>
+        </div>
+      )}
+
+      {/* Title Selector */}
       {showTitleSelector && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in" onClick={() => setShowTitleSelector(false)}>
               <div className="bg-noir-900 border border-noir-700 p-6 max-w-sm w-full shadow-2xl" onClick={e => e.stopPropagation()}>
-                  <h3 className="text-xl font-mono font-bold text-white mb-4 flex items-center gap-2">
-                      <Crown size={20} className="text-amber-500" /> Select Title
-                  </h3>
+                  <h3 className="text-xl font-mono font-bold text-white mb-4 flex items-center gap-2"><Crown size={20} className="text-amber-500" /> Select Title</h3>
                   <div className="space-y-2 max-h-[60vh] overflow-y-auto">
                       {Object.entries(gameState.unlockedTitles).map(([key, level]) => (
-                          <button
-                            key={key}
-                            onClick={() => {
-                                setGameState(prev => ({ ...prev, activeTitle: key }));
-                                setShowTitleSelector(false);
-                            }}
-                            className={`w-full text-left p-3 font-mono text-sm border transition-colors flex justify-between items-center
-                                ${gameState.activeTitle === key 
-                                    ? 'bg-amber-900/30 border-amber-500 text-amber-100' 
-                                    : 'bg-black border-noir-800 text-noir-400 hover:border-noir-500 hover:text-white'
-                                }
-                            `}
-                          >
+                          <button key={key} onClick={() => { setGameState(p => ({ ...p, activeTitle: key })); setShowTitleSelector(false); }} className={`w-full text-left p-3 font-mono text-sm border transition-colors flex justify-between items-center ${gameState.activeTitle === key ? 'bg-amber-900/30 border-amber-500 text-amber-100' : 'bg-black border-noir-800 text-noir-400 hover:border-noir-500 hover:text-white'}`}>
                               <span>{getTitleDisplay(key, level)}</span>
                               {gameState.activeTitle === key && <div className="w-2 h-2 rounded-full bg-amber-500"></div>}
                           </button>
@@ -1019,24 +767,40 @@ const App: React.FC = () => {
           </div>
       )}
       
-      {/* Celebration Overlay */}
+      {/* Hard Mode Prompt */}
+      {showHardModePrompt && (
+          <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/90 backdrop-blur-md p-6 animate-fade-in">
+              <div className="max-w-lg w-full bg-noir-950 border border-red-900 p-8 shadow-[0_0_50px_rgba(220,38,38,0.2)] text-center">
+                  <Skull size={48} className="text-red-500 mx-auto mb-6 animate-pulse" />
+                  <h2 className="text-3xl font-mono font-bold text-white mb-4">ESCALATION PROTOCOL</h2>
+                  <p className="text-noir-300 font-mono mb-6 leading-relaxed">
+                      You have mastered the void. Now the void stares back.
+                      <br/><br/>
+                      <span className="text-red-400 font-bold block">HARD MODE AVAILABLE</span>
+                  </p>
+                  <ul className="text-left text-sm font-mono text-noir-400 space-y-2 mb-8 bg-black/50 p-4 border border-noir-800">
+                      <li className="flex items-center gap-2"><span className="text-red-500">-</span> Max Probability Capped at 70%</li>
+                      <li className="flex items-center gap-2"><span className="text-red-500">-</span> Win Streak Requirement: 15</li>
+                      <li className="flex items-center gap-2"><span className="text-green-500">+</span> Access to Void Injection (+20% Buff)</li>
+                      <li className="flex items-center gap-2"><span className="text-green-500">+</span> Permanent 10x Cash Multiplier</li>
+                  </ul>
+                  <div className="flex gap-4">
+                      <button onClick={closeHardModePrompt} className="flex-1 py-3 border border-noir-700 text-noir-500 hover:bg-noir-900 hover:text-white transition-colors font-mono">DECLINE</button>
+                      <button onClick={enableHardMode} className="flex-1 py-3 bg-red-900/50 border border-red-600 text-red-100 hover:bg-red-800 transition-colors font-mono font-bold tracking-widest shadow-[0_0_15px_rgba(220,38,38,0.4)]">ENABLE & RESTART</button>
+                  </div>
+              </div>
+          </div>
+      )}
+
+      {/* Celebration */}
       {celebration && (
         <div className={`pointer-events-none fixed inset-0 z-[90] flex items-center justify-center flex-col overflow-hidden`}>
             {celebration.level >= 5 && <div className="absolute inset-0 bg-white/20 animate-flash mix-blend-overlay"></div>}
             <div className={`${celebration.level >= 8 ? 'animate-shake' : ''} flex flex-col items-center justify-center px-4`}>
-                <h2 key={celebration.id} 
-                    className={`
-                        font-mono font-bold drop-shadow-[0_0_15px_rgba(251,191,36,0.6)] text-center whitespace-nowrap 
-                        transition-transform duration-300
-                        ${celebration.level >= 9 ? 'text-7xl md:text-9xl text-amber-500 animate-scale-slam' : celebration.level >= 5 ? 'text-6xl md:text-8xl text-amber-400 animate-pop-up' : 'text-4xl md:text-6xl text-amber-200/80 animate-pop-in-up'}
-                        ${celebration.text.length > 15 ? 'md:transform-none -rotate-12 scale-90 origin-center' : ''}
-                    `}
-                >
+                <h2 key={celebration.id} className={`font-mono font-bold drop-shadow-[0_0_15px_rgba(251,191,36,0.6)] text-center transition-transform duration-300 max-w-[90vw] break-words leading-tight ${celebration.level >= 9 ? 'text-7xl md:text-9xl text-amber-500 animate-scale-slam' : celebration.level >= 5 ? 'text-6xl md:text-8xl text-amber-400 animate-pop-up' : 'text-4xl md:text-6xl text-amber-200/80 animate-pop-in-up'}`}>
                     {celebration.text}
                 </h2>
-                <div className={`mt-2 md:mt-4 font-mono font-bold tracking-[0.5em] md:tracking-[1em] text-white/90 uppercase ${celebration.level >= 7 ? 'text-2xl animate-pulse' : 'text-sm'}`}>
-                    {celebration.level}x STREAK
-                </div>
+                <div className={`mt-2 md:mt-4 font-mono font-bold tracking-[0.5em] md:tracking-[1em] text-white/90 uppercase ${celebration.level >= 7 ? 'text-2xl animate-pulse' : 'text-sm'}`}>{celebration.level}x STREAK</div>
             </div>
         </div>
       )}
@@ -1045,200 +809,93 @@ const App: React.FC = () => {
       {showMomModal.show && (
           <div className="fixed inset-0 z-[200] bg-black flex items-center justify-center p-6 animate-fade-in">
               <div className="max-w-md w-full text-center space-y-8">
-                  <div className="mx-auto w-24 h-24 rounded-full bg-pink-500/20 flex items-center justify-center mb-6 animate-pulse">
-                      <Heart size={48} className="text-pink-400" />
-                  </div>
+                  <div className="mx-auto w-24 h-24 rounded-full bg-pink-500/20 flex items-center justify-center mb-6 animate-pulse"><Heart size={48} className="text-pink-400" /></div>
                   <h3 className="text-3xl font-mono font-bold text-white mb-4">A Message for You</h3>
-                  <button 
-                    onClick={handleMomConfirm}
-                    className="text-xl md:text-2xl font-serif italic text-pink-300 hover:text-pink-100 transition-colors cursor-pointer border-b border-transparent hover:border-pink-500 pb-1"
-                  >
-                      "{showMomModal.text}"
-                  </button>
-                  <p className="text-noir-600 text-xs mt-12 font-mono">Click the message to accept it.</p>
+                  <button onClick={handleMomConfirm} className="text-xl md:text-2xl font-serif italic text-pink-300 hover:text-pink-100 transition-colors cursor-pointer border-b border-transparent hover:border-pink-500 pb-1">"{showMomModal.text}"</button>
               </div>
           </div>
       )}
 
-      {/* Background Atmosphere */}
-      <div className="fixed inset-0 z-0 bg-gradient-to-br from-noir-900 via-noir-950 to-black animate-pulse-slow opacity-50"></div>
-
-      {/* Main Game Area */}
       <div className="flex-1 flex flex-col relative min-h-[600px] md:min-h-0 z-10">
-        
-        {/* Header */}
         <header className="p-6 border-b border-noir-800/50 flex justify-between items-end bg-noir-950/30 backdrop-blur-sm relative z-50">
             <div>
-                <h1 className="text-3xl font-mono font-bold tracking-tighter text-white drop-shadow-md">
-                    BEAT THE <span className="text-amber-500">ODDS</span>
-                </h1>
+                <h1 className="text-3xl font-mono font-bold tracking-tighter text-white drop-shadow-md">BEAT THE <span className="text-amber-500">ODDS</span></h1>
                 <div className="flex gap-6 mt-3 text-sm font-mono text-noir-400">
-                    <div className="flex flex-col">
-                        <span className="text-[10px] uppercase tracking-widest text-noir-600 mb-0.5">Current Streak</span>
-                        <div className="flex items-baseline gap-1">
-                            <span className={`text-2xl font-bold leading-none ${gameState.streak > 0 ? 'text-amber-500' : 'text-noir-500'}`}>
-                                {gameState.streak}
-                            </span>
-                            <span className="text-noir-600">/ {WINNING_STREAK}</span>
-                        </div>
-                    </div>
-
-                    <div className="flex flex-col">
-                        <span className="text-[10px] uppercase tracking-widest text-noir-600 mb-0.5">Run Best</span>
-                        <span className={`text-2xl font-bold leading-none ${gameState.maxStreak > 0 ? 'text-noir-300' : 'text-noir-500'}`}>
-                            {gameState.maxStreak}
-                        </span>
-                    </div>
-
-                    {gameState.prestigeLevel > 0 && (
-                        <div className="flex flex-col">
-                            <span className="text-[10px] uppercase tracking-widest text-purple-400 mb-0.5">Prestige</span>
-                            <span className="text-2xl font-bold leading-none text-purple-300">{gameState.prestigeLevel}</span>
-                        </div>
-                    )}
+                    <div className="flex flex-col"><span className="text-[10px] uppercase tracking-widest text-noir-600 mb-0.5">Current Streak</span><div className="flex items-baseline gap-1"><span className={`text-2xl font-bold leading-none ${gameState.streak > 0 ? 'text-amber-500' : 'text-noir-500'}`}>{gameState.streak}</span><span className="text-noir-600">/ {gameState.isHardMode ? HARD_MODE_WINNING_STREAK : WINNING_STREAK}</span></div></div>
+                    <div className="flex flex-col"><span className="text-[10px] uppercase tracking-widest text-noir-600 mb-0.5">Run Best</span><span className={`text-2xl font-bold leading-none ${gameState.maxStreak > 0 ? 'text-noir-300' : 'text-noir-500'}`}>{gameState.maxStreak}</span></div>
+                    {gameState.prestigeLevel > 0 && (<div className="flex flex-col"><span className="text-[10px] uppercase tracking-widest text-purple-400 mb-0.5">Prestige</span><span className="text-2xl font-bold leading-none text-purple-300">{gameState.prestigeLevel}</span></div>)}
                 </div>
             </div>
-            
-            <div className="text-right">
+            <div className="text-right" ref={headerFundsRef}>
                 <span className="text-[10px] uppercase tracking-widest text-noir-600 block mb-1">Funds</span>
-                <span className="text-4xl font-mono font-bold text-white tracking-tight drop-shadow-[0_0_10px_rgba(255,255,255,0.1)]">
-                    {formatMoney(gameState.money)}
-                </span>
+                <span className="text-4xl font-mono font-bold text-white tracking-tight drop-shadow-[0_0_10px_rgba(255,255,255,0.1)]">{formatMoney(gameState.money)}</span>
             </div>
         </header>
 
-        {/* Center Stage */}
         <main className="flex-1 flex flex-col items-center justify-center relative z-10 py-10 md:py-0">
-            
             {hasWon ? (
                 <div className="text-center animate-fade-in space-y-6 bg-noir-900/90 p-12 border-2 border-amber-500/30 rounded-xl backdrop-blur-md shadow-[0_0_50px_rgba(0,0,0,0.8)] relative overflow-hidden group max-w-lg mx-4">
                     <div className="absolute inset-0 bg-gradient-to-t from-purple-900/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-1000"></div>
-                    
                     <Trophy className="w-24 h-24 text-amber-500 mx-auto mb-4 drop-shadow-[0_0_20px_rgba(245,158,11,0.6)] animate-bounce" />
-                    
                     <h2 className="text-5xl font-mono font-bold text-white tracking-tight">IMPOSSIBLE.</h2>
-                    
                     <div className="text-noir-300 font-mono leading-relaxed space-y-2">
                         <p>You defied the probability.</p>
-                        <p className="text-amber-400 font-bold text-xl">10 Heads in a row.</p>
+                        <p className="text-amber-400 font-bold text-xl">{gameState.isHardMode ? HARD_MODE_WINNING_STREAK : WINNING_STREAK} Heads in a row.</p>
                         <div className="pt-4 border-t border-noir-800 mt-4">
                             <p className="text-sm">Total Attempts: {gameState.totalFlips.toLocaleString()}</p>
-                            <p className="text-purple-400 font-bold text-lg mt-2 flex items-center justify-center gap-2">
-                                <Sparkles size={16} /> REWARD: {FRAGMENTS_PER_WIN} VOID FRAGMENTS
-                            </p>
+                            <p className="text-purple-400 font-bold text-lg mt-2 flex items-center justify-center gap-2"><Sparkles size={16} /> REWARD: {FRAGMENTS_PER_WIN} VOID FRAGMENTS</p>
                         </div>
                     </div>
-                    
                     <div className="flex flex-col gap-3 pt-4 relative z-50">
-                        <button 
-                            onClick={ascend}
-                            className="w-full px-8 py-4 bg-purple-600 text-white font-mono font-bold tracking-widest hover:bg-purple-500 transition-all duration-300 shadow-lg hover:shadow-purple-500/40 transform hover:-translate-y-1 flex items-center justify-center gap-3"
-                        >
-                            <Sparkles size={20} />
-                            ASCEND (NEW GAME+)
-                        </button>
-                        <p className="text-[10px] text-noir-500 font-mono uppercase tracking-widest">
-                            Resets progress • Keeps Prestige Upgrades • Increases Difficulty? No, just Profit.
-                        </p>
+                        <button onClick={() => ascend()} className="w-full px-8 py-4 bg-purple-600 text-white font-mono font-bold tracking-widest hover:bg-purple-500 transition-all duration-300 shadow-lg hover:shadow-purple-500/40 transform hover:-translate-y-1 flex items-center justify-center gap-3"><Sparkles size={20} /> ASCEND (NEW GAME+)</button>
+                        <p className="text-[10px] text-noir-500 font-mono uppercase tracking-widest">Resets progress • Keeps Prestige Upgrades • Increases Difficulty? No, just Profit.</p>
                     </div>
                 </div>
             ) : (
                 <div className="flex flex-col items-center gap-16 w-full max-w-md z-10">
-                    
-                    {/* Coin Container */}
                     <div className="relative w-64 h-64 perspective-1000 flex items-center justify-center">
-                        <div 
-                           className="absolute bottom-10 w-32 h-4 bg-black/40 blur-xl rounded-[100%]"
-                           style={{ animation: isFlipping ? `shadowScale ${currentSpeed}ms cubic-bezier(0.5, 0, 0.5, 1) forwards` : 'none' }}
-                        ></div>
-
-                        <div 
-                          className="w-48 h-48 relative preserve-3d"
-                          style={{ animation: isFlipping ? `tossHeight ${currentSpeed}ms cubic-bezier(0.5, 0, 0.5, 1) forwards` : 'none' }}
-                        >
-                            <div 
-                                className="w-full h-full relative preserve-3d"
-                                style={{ 
-                                    animation: isFlipping ? `tossSpin ${currentSpeed}ms linear infinite` : 'none',
-                                    transform: !isFlipping && coinSide ? (coinSide === 'T' ? 'rotateX(180deg)' : 'rotateX(0deg)') : undefined
-                                }}
-                            >
-                                {/* Heads */}
-                                <div className="absolute inset-0 backface-hidden rounded-full bg-gradient-to-br from-amber-200 via-amber-500 to-amber-700 shadow-inner border-4 border-amber-600 flex items-center justify-center overflow-hidden" style={{ transform: 'rotateX(0deg)' }}>
-                                    <div className="absolute inset-0 opacity-20 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')]"></div>
-                                    <div className="absolute inset-2 border-2 border-dashed border-amber-300/30 rounded-full"></div>
-                                    <span className="text-8xl font-serif font-bold text-amber-950 mix-blend-overlay drop-shadow-md relative z-10">$</span>
-                                    <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/30 to-transparent rounded-full pointer-events-none"></div>
-                                </div>
-                                {/* Tails */}
-                                <div className="absolute inset-0 backface-hidden rounded-full bg-gradient-to-br from-slate-200 via-slate-400 to-slate-600 shadow-inner border-4 border-slate-500 flex items-center justify-center overflow-hidden" style={{ transform: 'rotateX(180deg)' }}>
-                                    <div className="absolute inset-0 opacity-20 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')]"></div>
-                                    <div className="absolute inset-2 border-2 border-dashed border-slate-300/30 rounded-full"></div>
-                                    <div className="relative w-full h-full z-10 opacity-70">
-                                        <div className="absolute top-[35%] left-[28%] w-[14%] h-[14%] bg-slate-900 rounded-full mix-blend-overlay shadow-sm"></div>
-                                        <div className="absolute top-[35%] right-[28%] w-[14%] h-[14%] bg-slate-900 rounded-full mix-blend-overlay shadow-sm"></div>
-                                        <div className="absolute top-[52%] left-1/2 -translate-x-1/2 w-[55%] h-[35%] border-t-[10px] border-slate-900 rounded-[50%] mix-blend-overlay"></div>
-                                    </div>
-                                    <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/20 to-transparent rounded-full pointer-events-none"></div>
-                                </div>
+                        <div className="absolute bottom-10 w-32 h-4 bg-black/40 blur-xl rounded-[100%]" style={{ animation: isFlipping ? `shadowScale ${Math.max(1, UPGRADES[UpgradeType.SPEED].getEffect(gameState.upgrades[UpgradeType.SPEED]) - (UPGRADES[UpgradeType.PRESTIGE_FLUX].getEffect(gameState.upgrades[UpgradeType.PRESTIGE_FLUX] || 0) * 250))}ms cubic-bezier(0.5, 0, 0.5, 1) forwards` : 'none' }}></div>
+                        <div className="w-48 h-48 relative preserve-3d" style={{ animation: isFlipping ? `tossHeight ${Math.max(1, UPGRADES[UpgradeType.SPEED].getEffect(gameState.upgrades[UpgradeType.SPEED]) - (UPGRADES[UpgradeType.PRESTIGE_FLUX].getEffect(gameState.upgrades[UpgradeType.PRESTIGE_FLUX] || 0) * 250))}ms cubic-bezier(0.5, 0, 0.5, 1) forwards` : 'none' }}>
+                            <div className="w-full h-full relative preserve-3d" style={{ animation: isFlipping ? `tossSpin ${Math.max(1, UPGRADES[UpgradeType.SPEED].getEffect(gameState.upgrades[UpgradeType.SPEED]) - (UPGRADES[UpgradeType.PRESTIGE_FLUX].getEffect(gameState.upgrades[UpgradeType.PRESTIGE_FLUX] || 0) * 250))}ms linear infinite` : 'none', transform: !isFlipping && coinSide ? (coinSide === 'T' ? 'rotateX(180deg)' : 'rotateX(0deg)') : undefined }}>
+                                <div className="absolute inset-0 backface-hidden rounded-full bg-gradient-to-br from-amber-200 via-amber-500 to-amber-700 shadow-inner border-4 border-amber-600 flex items-center justify-center overflow-hidden" style={{ transform: 'rotateX(0deg)' }}><div className="absolute inset-0 opacity-20 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')]"></div><span className="text-8xl font-serif font-bold text-amber-950 mix-blend-overlay drop-shadow-md relative z-10">$</span></div>
+                                <div className="absolute inset-0 backface-hidden rounded-full bg-gradient-to-br from-slate-200 via-slate-400 to-slate-600 shadow-inner border-4 border-slate-500 flex items-center justify-center overflow-hidden" style={{ transform: 'rotateX(180deg)' }}><div className="absolute inset-0 opacity-20 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')]"></div><div className="relative w-full h-full z-10 opacity-70"><div className="absolute top-[35%] left-[28%] w-[14%] h-[14%] bg-slate-900 rounded-full mix-blend-overlay shadow-sm"></div><div className="absolute top-[35%] right-[28%] w-[14%] h-[14%] bg-slate-900 rounded-full mix-blend-overlay shadow-sm"></div><div className="absolute top-[52%] left-1/2 -translate-x-1/2 w-[55%] h-[35%] border-t-[10px] border-slate-900 rounded-[50%] mix-blend-overlay"></div></div></div>
                             </div>
                         </div>
                     </div>
 
-                    {/* Controls */}
                     <div className="w-full flex flex-col gap-6 items-center">
-                        <button
-                            onClick={() => handleFlip(false)}
-                            disabled={isFlipping}
-                            className={`
-                                group relative w-full max-w-[240px] py-5 text-xl font-mono font-bold tracking-[0.2em] border transition-all duration-200 overflow-hidden z-20 cursor-pointer
-                                ${isFlipping 
-                                    ? 'border-noir-800 text-noir-700 bg-black cursor-not-allowed scale-95' 
-                                    : 'border-white text-white bg-transparent hover:bg-white hover:text-black hover:shadow-[0_0_30px_rgba(255,255,255,0.2)] active:scale-95'
-                                }
-                            `}
-                        >
-                            <span className="relative z-10">{isFlipping ? 'FLIPPING...' : 'FLIP COIN'}</span>
-                        </button>
-                        
+                        <button onClick={() => handleFlip(false)} disabled={isFlipping} className={`group relative w-full max-w-[240px] py-5 text-xl font-mono font-bold tracking-[0.2em] border transition-all duration-200 overflow-hidden z-20 cursor-pointer ${isFlipping ? 'border-noir-800 text-noir-700 bg-black cursor-not-allowed scale-95' : 'border-white text-white bg-transparent hover:bg-white hover:text-black hover:shadow-[0_0_30px_rgba(255,255,255,0.2)] active:scale-95'}`}><span className="relative z-10">{isFlipping ? 'FLIPPING...' : 'FLIP COIN'}</span></button>
                         <div className="flex flex-col items-center gap-1">
                              <div className="text-[10px] uppercase tracking-widest text-noir-500">Probability</div>
-                             <div className="font-mono text-amber-500 text-lg font-bold">{(currentChance * 100).toFixed(0)}%</div>
-                             {prestigeBaseChance > 0 && (
-                                <div className="text-[10px] text-purple-400 font-mono">(+{(prestigeBaseChance * 100).toFixed(0)}% Base)</div>
-                             )}
+                             <div className="font-mono text-amber-500 text-lg font-bold flex items-center gap-2">{(calculateChance() * 100).toFixed(0)}%{gameState.upgrades[UpgradeType.HARD_MODE_BUFF] > 0 && <Syringe size={14} className="text-red-500 animate-pulse" />}</div>
+                             {(gameState.upgrades[UpgradeType.PRESTIGE_FATE] || 0) > 0 && <div className="text-[10px] text-purple-400 font-mono">(+{((gameState.upgrades[UpgradeType.PRESTIGE_FATE] || 0) * 2.5).toFixed(0)}% Base)</div>}
+                             {gameState.isHardMode && <div className="text-[10px] text-red-500 font-mono font-bold mt-1">CAP: 70%</div>}
                         </div>
                     </div>
                 </div>
             )}
         </main>
 
-        {/* Footer */}
         <footer className="h-20 bg-noir-950/80 backdrop-blur-md border-t border-noir-800/50 flex items-center justify-between px-6 relative z-50">
             <div className="flex gap-3 overflow-hidden mask-linear-fade items-center">
                 <span className="text-[10px] uppercase tracking-widest text-noir-700 mr-2">History</span>
                 {gameState.history.map((res, i) => (
-                    <div key={i} className={`w-8 h-8 flex items-center justify-center font-mono font-bold rounded-sm text-xs shadow-lg transition-transform hover:scale-110 cursor-default ${res === 'H' ? 'bg-gradient-to-b from-amber-500 to-amber-700 text-white border border-amber-400' : 'bg-gradient-to-b from-noir-700 to-noir-800 text-noir-400 border border-noir-600'}`}>
-                        {res === 'H' ? '$' : <span className="rotate-90 inline-block text-[8px] tracking-tighter font-sans scale-y-150 transform-gpu">:(</span>}
-                    </div>
+                    <div key={i} className={`w-8 h-8 flex items-center justify-center font-mono font-bold rounded-sm text-xs shadow-lg transition-transform hover:scale-110 cursor-default ${res === 'H' ? 'bg-gradient-to-b from-amber-500 to-amber-700 text-white border border-amber-400' : 'bg-gradient-to-b from-noir-700 to-noir-800 text-noir-400 border border-noir-600'}`}>{res === 'H' ? '$' : <span className="rotate-90 inline-block text-[8px] tracking-tighter font-sans scale-y-150 transform-gpu">:(</span>}</div>
                 ))}
             </div>
             
             <div className="flex gap-4">
-                 {(gameState.playerName || hasWon) && (
-                     <button onClick={() => setShowLeaderboard(true)} className="p-2 text-amber-500 hover:text-white transition-colors hover:bg-amber-900/50 rounded-full cursor-pointer animate-fade-in" title="Leaderboard">
-                        <List size={20} />
+                 {gameState.prestigeLevel >= 50 && !gameState.isHardMode && (
+                    <button onClick={() => setShowHardModePrompt(true)} className="p-2 text-noir-500 hover:text-red-500 transition-colors hover:bg-noir-900 rounded-full cursor-pointer" title="Enable Hard Mode">
+                        <Skull size={20} />
                     </button>
                  )}
-                 <button onClick={toggleMute} className="p-2 text-noir-500 hover:text-white transition-colors hover:bg-noir-900 rounded-full cursor-pointer" title={muted ? "Unmute" : "Mute"}>
-                    {muted ? <VolumeX size={20} /> : <Volume2 size={20} />}
-                </button>
-                 <button onClick={() => setShowModal(true)} className="p-2 text-noir-500 hover:text-white transition-colors hover:bg-noir-900 rounded-full cursor-pointer" title="Math Analysis">
-                    <HelpCircle size={20} />
-                </button>
-                 <button onClick={handleDeleteClick} className={`p-2 transition-colors rounded-full font-mono text-xs flex items-center justify-center cursor-pointer w-9 h-9 ${deleteConfirm ? 'bg-red-900 text-white hover:bg-red-800 ring-1 ring-red-500' : 'text-noir-500 hover:text-red-500 hover:bg-noir-900'}`} title="Delete Save & Reset">
-                    {deleteConfirm ? '!' : <Trash2 size={20} />}
-                </button>
+                 {(gameState.playerName || hasWon) && (
+                     <button onClick={() => setShowLeaderboard(true)} className="p-2 text-amber-500 hover:text-white transition-colors hover:bg-amber-900/50 rounded-full cursor-pointer animate-fade-in" title="Leaderboard"><List size={20} /></button>
+                 )}
+                 <button onClick={toggleMute} className="p-2 text-noir-500 hover:text-white transition-colors hover:bg-noir-900 rounded-full cursor-pointer" title={muted ? "Unmute" : "Mute"}>{muted ? <VolumeX size={20} /> : <Volume2 size={20} />}</button>
+                 <button onClick={() => setShowModal(true)} className="p-2 text-noir-500 hover:text-white transition-colors hover:bg-noir-900 rounded-full cursor-pointer" title="Math Analysis"><HelpCircle size={20} /></button>
+                 <button onClick={handleDeleteClick} className={`p-2 transition-colors rounded-full font-mono text-xs flex items-center justify-center cursor-pointer w-9 h-9 ${deleteConfirm ? 'bg-red-900 text-white hover:bg-red-800 ring-1 ring-red-500' : 'text-noir-500 hover:text-red-500 hover:bg-noir-900'}`} title="Delete Save & Reset">{deleteConfirm ? '!' : <Trash2 size={20} />}</button>
             </div>
         </footer>
 
@@ -1249,49 +906,24 @@ const App: React.FC = () => {
         voidFragments={gameState.voidFragments}
         prestigeLevel={gameState.prestigeLevel}
         upgrades={gameState.upgrades} 
-        onBuy={buyUpgrade}
+        onBuy={handleBuy}
         maxStreak={gameState.maxStreak}
         autoFlipEnabled={gameState.autoFlipEnabled}
         onToggleAutoFlip={toggleAutoFlip}
         autoBuyEnabled={gameState.autoBuyEnabled}
         onToggleAutoBuy={toggleAutoBuy}
         seenUpgrades={gameState.seenUpgrades}
-        onSeen={handleUpgradeSeen}
+        onSeen={handleSeen}
         momPurchases={gameState.stats.momPurchases}
+        isHardMode={gameState.isHardMode}
+        playerStats={gameState.stats}
       />
 
       <div className="relative z-[100]">
-        <ProbabilityModal isOpen={showModal} onClose={() => setShowModal(false)} currentChance={currentChance} />
-        <LeaderboardModal 
-            isOpen={showLeaderboard} 
-            onClose={() => setShowLeaderboard(false)} 
-            playerName={gameState.playerName}
-            onRegisterName={registerName}
-            currentStats={gameState.stats ? {
-                purist: gameState.stats.puristWins,
-                prestige: gameState.stats.maxPrestigeLevel,
-                rich: gameState.stats.highestCash,
-                mommy: gameState.stats.momPurchases
-            } : undefined}
-        />
+        <ProbabilityModal isOpen={showModal} onClose={() => setShowModal(false)} currentChance={calculateChance()} />
+        <LeaderboardModal isOpen={showLeaderboard} onClose={() => setShowLeaderboard(false)} playerName={gameState.playerName} onRegisterName={registerName} currentStats={{ purist: gameState.stats.puristWins, prestige: gameState.stats.maxPrestigeLevel, rich: gameState.stats.highestCash, mommy: gameState.stats.momPurchases }} />
       </div>
-
-      <style>{`
-        .rotate-x-180 { transform: rotateX(180deg); }
-        .mask-linear-fade { mask-image: linear-gradient(to right, transparent, black 10%, black 90%, transparent); -webkit-mask-image: linear-gradient(to right, transparent, black 10%, black 90%, transparent); }
-        @keyframes popInUp { 0% { opacity: 0; transform: translateY(20px) scale(0.9); } 100% { opacity: 1; transform: translateY(0) scale(1); } }
-        .animate-pop-in-up { animation: popInUp 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
-        @keyframes popUp { 0% { opacity: 0; transform: scale(0.5); } 50% { opacity: 1; transform: scale(1.1); } 100% { opacity: 1; transform: scale(1); } }
-        .animate-pop-up { animation: popUp 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
-        @keyframes scaleSlam { 0% { opacity: 0; transform: scale(5); } 60% { opacity: 1; transform: scale(0.9); } 100% { opacity: 1; transform: scale(1); } }
-        .animate-scale-slam { animation: scaleSlam 0.5s cubic-bezier(0.6, -0.28, 0.735, 0.045) forwards; }
-        @keyframes flash { 0%, 100% { opacity: 0; } 10%, 90% { opacity: 1; } }
-        .animate-flash { animation: flash 0.3s ease-out forwards; }
-        @keyframes shake { 0%, 100% { transform: translateX(0); } 10%, 30%, 50%, 70%, 90% { transform: translateX(-5px) rotate(-1deg); } 20%, 40%, 60%, 80% { transform: translateX(5px) rotate(1deg); } }
-        .animate-shake { animation: shake 0.5s ease-in-out; }
-        @keyframes particle { 0% { transform: translate(0, 0) scale(1); opacity: 1; } 100% { transform: translate(var(--tw-translate-x, 100px), var(--tw-translate-y, 100px)) scale(0); opacity: 0; } }
-        .animate-particle { animation: particle 1s ease-out forwards; }
-      `}</style>
+      <style>{`.rotate-x-180 { transform: rotateX(180deg); } .mask-linear-fade { mask-image: linear-gradient(to right, transparent, black 10%, black 90%, transparent); -webkit-mask-image: linear-gradient(to right, transparent, black 10%, black 90%, transparent); } @keyframes popInUp { 0% { opacity: 0; transform: translateY(20px) scale(0.9); } 100% { opacity: 1; transform: translateY(0) scale(1); } } .animate-pop-in-up { animation: popInUp 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; } @keyframes popUp { 0% { opacity: 0; transform: scale(0.5); } 50% { opacity: 1; transform: scale(1.1); } 100% { opacity: 1; transform: scale(1); } } .animate-pop-up { animation: popUp 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; } @keyframes scaleSlam { 0% { opacity: 0; transform: scale(5); } 60% { opacity: 1; transform: scale(0.9); } 100% { opacity: 1; transform: scale(1); } } .animate-scale-slam { animation: scaleSlam 0.5s cubic-bezier(0.6, -0.28, 0.735, 0.045) forwards; } @keyframes flash { 0%, 100% { opacity: 0; } 10%, 90% { opacity: 1; } } .animate-flash { animation: flash 0.3s ease-out forwards; } @keyframes shake { 0%, 100% { transform: translateX(0); } 10%, 30%, 50%, 70%, 90% { transform: translateX(-5px) rotate(-1deg); } 20%, 40%, 60%, 80% { transform: translateX(5px) rotate(1deg); } } .animate-shake { animation: shake 0.5s ease-in-out; } @keyframes particle { 0% { transform: translate(0, 0) scale(1); opacity: 1; } 100% { transform: translate(var(--tw-translate-x, 100px), var(--tw-translate-y, 100px)) scale(0); opacity: 0; } } .animate-particle { animation: particle 1s ease-out forwards; }`}</style>
     </div>
   );
 };
