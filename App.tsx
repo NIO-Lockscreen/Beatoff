@@ -235,6 +235,13 @@ const App: React.FC = () => {
   const deleteTimeoutRef = useRef<number | undefined>(undefined);
   const cheatCodeBuffer = useRef<string>("");
 
+  // Calculate dynamic Hard Mode Goal
+  const getHardModeGoal = useCallback(() => {
+      return HARD_MODE_WINNING_STREAK + (gameState.stats.hardModeWins * 5);
+  }, [gameState.stats.hardModeWins]);
+
+  const currentGoal = gameState.isHardMode ? getHardModeGoal() : WINNING_STREAK;
+
   // Persistence
   useEffect(() => {
     secureSave(SAVE_KEY, gameState);
@@ -265,8 +272,8 @@ const App: React.FC = () => {
       
       // Hard Mode Limit Logic
       if (gameState.isHardMode) {
-          // STRICT CAP: Dollar upgrades cannot push past 70% in Hard Mode
-          chance = Math.min(0.70, chance);
+          // STRICT CAP: Dollar upgrades cannot push past 60% in Hard Mode
+          chance = Math.min(0.60, chance);
       } else {
           // Standard Mode Cap
           chance = Math.min(0.99, chance);
@@ -477,7 +484,9 @@ const App: React.FC = () => {
 
   // Win Detection
   useEffect(() => {
-    const goal = gameState.isHardMode ? HARD_MODE_WINNING_STREAK : WINNING_STREAK;
+    // Dynamic Goal Logic
+    const goal = gameState.isHardMode ? HARD_MODE_WINNING_STREAK + (gameState.stats.hardModeWins * 5) : WINNING_STREAK;
+    
     if (gameState.streak >= goal && !hasWon) {
         setHasWon(true);
         setGameState(prev => {
@@ -508,20 +517,21 @@ const App: React.FC = () => {
   // Auto Flip
   useEffect(() => {
     const hasAuto = gameState.upgrades[UpgradeType.AUTO_FLIP] > 0 || gameState.upgrades[UpgradeType.PRESTIGE_AUTO] > 0;
-    const goal = gameState.isHardMode ? HARD_MODE_WINNING_STREAK : WINNING_STREAK;
+    const goal = gameState.isHardMode ? HARD_MODE_WINNING_STREAK + (gameState.stats.hardModeWins * 5) : WINNING_STREAK;
     
     if (gameState.autoFlipEnabled && hasAuto && !isFlipping && !hasWon && gameState.streak < goal && !showMomModal.show) {
         const timer = window.setTimeout(() => handleFlip(false, true), 100) as unknown as number;
         return () => window.clearTimeout(timer);
     }
-  }, [gameState.autoFlipEnabled, isFlipping, hasWon, gameState.streak, gameState.isHardMode, gameState.upgrades, handleFlip, showMomModal]);
+  }, [gameState.autoFlipEnabled, isFlipping, hasWon, gameState.streak, gameState.isHardMode, gameState.upgrades, handleFlip, showMomModal, gameState.stats.hardModeWins]);
 
   // Auto Buy
   useEffect(() => {
     if (gameState.autoBuyEnabled && gameState.upgrades[UpgradeType.PRESTIGE_AUTO_BUY] > 0) {
         const interval = window.setInterval(() => {
             setGameState(prev => {
-                if (prev.money <= 0 || prev.streak >= (prev.isHardMode ? HARD_MODE_WINNING_STREAK : WINNING_STREAK)) return prev;
+                const goal = prev.isHardMode ? HARD_MODE_WINNING_STREAK + (prev.stats.hardModeWins * 5) : WINNING_STREAK;
+                if (prev.money <= 0 || prev.streak >= goal) return prev;
                 let newState = { ...prev };
                 let bought = false;
                 let updatedSeen = [...prev.seenUpgrades];
@@ -699,9 +709,9 @@ const App: React.FC = () => {
 
   useEffect(() => {
       return () => {
-          window.clearTimeout(flipTimeoutRef.current);
-          window.clearTimeout(celebrationTimeoutRef.current);
-          window.clearTimeout(deleteTimeoutRef.current);
+          window.clearTimeout(flipTimeoutRef.current as unknown as number);
+          window.clearTimeout(celebrationTimeoutRef.current as unknown as number);
+          window.clearTimeout(deleteTimeoutRef.current as unknown as number);
       };
   }, []);
 
@@ -791,8 +801,8 @@ const App: React.FC = () => {
                       <span className="text-red-400 font-bold block">HARD MODE AVAILABLE</span>
                   </p>
                   <ul className="text-left text-sm font-mono text-noir-400 space-y-2 mb-8 bg-black/50 p-4 border border-noir-800">
-                      <li className="flex items-center gap-2"><span className="text-red-500">-</span> Max Probability Capped at 70%</li>
-                      <li className="flex items-center gap-2"><span className="text-red-500">-</span> Win Streak Requirement: 15</li>
+                      <li className="flex items-center gap-2"><span className="text-red-500">-</span> Max Probability Capped at 60%</li>
+                      <li className="flex items-center gap-2"><span className="text-red-500">-</span> Win Streak Requirement: {HARD_MODE_WINNING_STREAK} (+5 per Hard Win)</li>
                       <li className="flex items-center gap-2"><span className="text-green-500">+</span> Access to Void Injection (+20% Buff)</li>
                       <li className="flex items-center gap-2"><span className="text-green-500">+</span> Permanent 10x Cash Multiplier</li>
                   </ul>
@@ -833,7 +843,7 @@ const App: React.FC = () => {
             <div>
                 <h1 className="text-3xl font-mono font-bold tracking-tighter text-white drop-shadow-md">BEAT THE <span className="text-amber-500">ODDS</span></h1>
                 <div className="flex gap-6 mt-3 text-sm font-mono text-noir-400">
-                    <div className="flex flex-col"><span className="text-[10px] uppercase tracking-widest text-noir-600 mb-0.5">Current Streak</span><div className="flex items-baseline gap-1"><span className={`text-2xl font-bold leading-none ${gameState.streak > 0 ? 'text-amber-500' : 'text-noir-500'}`}>{gameState.streak}</span><span className="text-noir-600">/ {gameState.isHardMode ? HARD_MODE_WINNING_STREAK : WINNING_STREAK}</span></div></div>
+                    <div className="flex flex-col"><span className="text-[10px] uppercase tracking-widest text-noir-600 mb-0.5">Current Streak</span><div className="flex items-baseline gap-1"><span className={`text-2xl font-bold leading-none ${gameState.streak > 0 ? 'text-amber-500' : 'text-noir-500'}`}>{gameState.streak}</span><span className="text-noir-600">/ {currentGoal}</span></div></div>
                     <div className="flex flex-col"><span className="text-[10px] uppercase tracking-widest text-noir-600 mb-0.5">Run Best</span><span className={`text-2xl font-bold leading-none ${gameState.maxStreak > 0 ? 'text-noir-300' : 'text-noir-500'}`}>{gameState.maxStreak}</span></div>
                     {gameState.prestigeLevel > 0 && (<div className="flex flex-col"><span className="text-[10px] uppercase tracking-widest text-purple-400 mb-0.5">Prestige</span><span className="text-2xl font-bold leading-none text-purple-300">{gameState.prestigeLevel}</span></div>)}
                 </div>
@@ -852,7 +862,7 @@ const App: React.FC = () => {
                     <h2 className="text-5xl font-mono font-bold text-white tracking-tight">IMPOSSIBLE.</h2>
                     <div className="text-noir-300 font-mono leading-relaxed space-y-2">
                         <p>You defied the probability.</p>
-                        <p className="text-amber-400 font-bold text-xl">{gameState.isHardMode ? HARD_MODE_WINNING_STREAK : WINNING_STREAK} Heads in a row.</p>
+                        <p className="text-amber-400 font-bold text-xl">{currentGoal} Heads in a row.</p>
                         <div className="pt-4 border-t border-noir-800 mt-4">
                             <p className="text-sm">Total Attempts: {gameState.totalFlips.toLocaleString()}</p>
                             <p className="text-purple-400 font-bold text-lg mt-2 flex items-center justify-center gap-2"><Sparkles size={16} /> REWARD: {FRAGMENTS_PER_WIN} VOID FRAGMENTS</p>
@@ -881,7 +891,7 @@ const App: React.FC = () => {
                              <div className="text-[10px] uppercase tracking-widest text-noir-500">Probability</div>
                              <div className="font-mono text-amber-500 text-lg font-bold flex items-center gap-2">{(calculateChance() * 100).toFixed(0)}%{gameState.upgrades[UpgradeType.HARD_MODE_BUFF] > 0 && <Syringe size={14} className="text-red-500 animate-pulse" />}</div>
                              {(gameState.upgrades[UpgradeType.PRESTIGE_FATE] || 0) > 0 && <div className="text-[10px] text-purple-400 font-mono">(+{((gameState.upgrades[UpgradeType.PRESTIGE_FATE] || 0) * 2.5).toFixed(0)}% Base)</div>}
-                             {gameState.isHardMode && <div className="text-[10px] text-red-500 font-mono font-bold mt-1">CAP: 70%</div>}
+                             {gameState.isHardMode && <div className="text-[10px] text-red-500 font-mono font-bold mt-1">CAP: 60%</div>}
                         </div>
                     </div>
                 </div>
