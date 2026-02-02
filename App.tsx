@@ -262,13 +262,23 @@ const App: React.FC = () => {
       const buffActive = gameState.upgrades[UpgradeType.HARD_MODE_BUFF] > 0;
       
       let chance = 0.20 + (chanceLevel * 0.05) + (fateLevel * 0.025);
-      if (buffActive) chance += 0.2;
-
-      const cap = gameState.isHardMode ? 0.70 : 0.99;
-      if (chance > cap) chance = cap;
-      if (gameState.upgrades[UpgradeType.PRESTIGE_LIMITLESS] > 0) chance = 0.99;
       
-      return Math.min(1.0, chance);
+      // Hard Mode Limit Logic
+      if (gameState.isHardMode) {
+          // STRICT CAP: Dollar upgrades cannot push past 70% in Hard Mode
+          chance = Math.min(0.70, chance);
+      } else {
+          // Standard Mode Cap
+          chance = Math.min(0.99, chance);
+      }
+
+      // Void Injection (Hard Mode Buff) - applied AFTER the cap
+      if (buffActive) {
+          chance += 0.2;
+      }
+      
+      // Final sanity check (never exceed 99%)
+      return Math.min(0.99, chance);
   }, [gameState.upgrades, gameState.isHardMode]);
 
   const ascend = (forceHardMode: boolean = false) => {
@@ -278,7 +288,8 @@ const App: React.FC = () => {
       const prestigeUpgrades: Record<string, number> = {};
       Object.keys(gameState.upgrades).forEach(key => {
           const k = key as UpgradeType;
-          if (UPGRADES[k].isPrestige) {
+          // Preserve Prestige items AND Care Package (One-time purchase)
+          if (UPGRADES[k].isPrestige || k === UpgradeType.PRESTIGE_CARE_PACKAGE) {
               prestigeUpgrades[k] = gameState.upgrades[k];
           } else {
               prestigeUpgrades[k] = 0;
@@ -349,6 +360,7 @@ const App: React.FC = () => {
     const hasLimitless = (gameState.upgrades[UpgradeType.PRESTIGE_LIMITLESS] || 0) > 0;
     
     let duration = UPGRADES[UpgradeType.SPEED].getEffect(speedLevel);
+    // Allow going below 50ms only if Limitless is active
     duration = Math.max(hasLimitless ? 1 : 50, duration - (fluxLevel * 250));
 
     if (duration > 50) AudioService.playFlip();
@@ -420,7 +432,7 @@ const App: React.FC = () => {
                     if (celebrationTimeoutRef.current) window.clearTimeout(celebrationTimeoutRef.current);
                     let message = CELEBRATION_MESSAGES[Math.min(newStreak, CELEBRATION_MESSAGES.length - 1)] || "GODLIKE";
                     setCelebration({ text: message, level: newStreak, id: Date.now() });
-                    celebrationTimeoutRef.current = window.setTimeout(() => setCelebration(null), 2500);
+                    celebrationTimeoutRef.current = window.setTimeout(() => setCelebration(null), 2500) as unknown as number;
                 }
 
                 if (prev.activeTitle === 'RICH' && newState.money >= 1000000) {
@@ -459,7 +471,7 @@ const App: React.FC = () => {
         });
         
         setIsFlipping(false);
-    }, duration);
+    }, duration) as unknown as number;
 
   }, [isFlipping, hasWon, showMomModal, calculateChance, gameState.upgrades, gameState.prestigeLevel, gameState.isHardMode]);
 
@@ -499,7 +511,7 @@ const App: React.FC = () => {
     const goal = gameState.isHardMode ? HARD_MODE_WINNING_STREAK : WINNING_STREAK;
     
     if (gameState.autoFlipEnabled && hasAuto && !isFlipping && !hasWon && gameState.streak < goal && !showMomModal.show) {
-        const timer = window.setTimeout(() => handleFlip(false, true), 100);
+        const timer = window.setTimeout(() => handleFlip(false, true), 100) as unknown as number;
         return () => window.clearTimeout(timer);
     }
   }, [gameState.autoFlipEnabled, isFlipping, hasWon, gameState.streak, gameState.isHardMode, gameState.upgrades, handleFlip, showMomModal]);
@@ -538,7 +550,7 @@ const App: React.FC = () => {
                 if (bought) newState.seenUpgrades = updatedSeen;
                 return bought ? newState : prev;
             });
-        }, 1000);
+        }, 1000) as unknown as number;
         return () => window.clearInterval(interval);
     }
   }, [gameState.autoBuyEnabled, gameState.upgrades]);
@@ -658,7 +670,7 @@ const App: React.FC = () => {
         window.location.reload();
     } else {
         setDeleteConfirm(true);
-        deleteTimeoutRef.current = window.setTimeout(() => setDeleteConfirm(false), 3000);
+        deleteTimeoutRef.current = window.setTimeout(() => setDeleteConfirm(false), 3000) as any;
     }
   };
 

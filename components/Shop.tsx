@@ -85,16 +85,18 @@ const Shop: React.FC<ShopProps> = ({
         return playerStats.hardModeWins > 0;
     }
 
+    // Care Package logic: Hide if bought (level > 0), show if Prestige >= 15
+    if (upgradeId === UpgradeType.PRESTIGE_CARE_PACKAGE) {
+        if ((upgrades[upgradeId] || 0) > 0) return false; // Already bought
+        if (prestigeLevel < 15) return false; // Not high enough level
+        return true;
+    }
+
     // 1. Base Prestige Check: If we haven't prestiged, NO prestige items should be unlocked/visible
     if ((upgrade.isPrestige || upgrade.id === UpgradeType.PRESTIGE_MOM) && prestigeLevel === 0) {
         return false;
     }
     
-    // Special handling for Care Package: Requires Prestige 15
-    if (upgradeId === UpgradeType.PRESTIGE_CARE_PACKAGE && prestigeLevel < 15) {
-        return false;
-    }
-
     // 2. Specific Prestige Tier Checks
     if (upgradeId === UpgradeType.PRESTIGE_PASSIVE && prestigeLevel < 2) return false;
     if (upgradeId === UpgradeType.PRESTIGE_AUTO && prestigeLevel < 3) return false;
@@ -106,7 +108,6 @@ const Shop: React.FC<ShopProps> = ({
 
     // 3. Standard Upgrade Checks
     // Logic: Unlocked if owned OR Threshold met.
-    // NOTE: Removed prestigeLevel bypass to force re-unlocking via streak on every run.
     if (upgradeId === UpgradeType.PASSIVE_INCOME) {
         const owned = (upgrades[upgradeId] || 0) > 0;
         if (!owned && maxStreak < 3) return false;
@@ -202,9 +203,6 @@ const Shop: React.FC<ShopProps> = ({
 
     const isMaxed = currentLevel >= effectiveMaxLevel;
     
-    // Care Package shows as maxed when bought since it's one-time purchase
-    // We do NOT hide it so user sees they bought it
-
     let cost = isMaxed ? 0 : (upgrade.costTiers[currentLevel] || upgrade.costTiers[upgrade.costTiers.length - 1]);
     const isPrestige = upgrade.isPrestige || false;
     

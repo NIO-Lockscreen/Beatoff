@@ -22,14 +22,14 @@ export const UPGRADES: Record<UpgradeType, UpgradeConfig> = {
     name: "Weighted Coin",
     description: "Increases the probability of flipping Heads.",
     baseCost: 1,
-    // Extended tiers for Limitless
+    // Extended tiers for Limitless - Costs scale aggressively to prevent trivializing the game immediately
     costTiers: [
         1, 10, 100, 200, 300, 500, 1000, 1500, 2000, 3000, 5000, 7000, 8000, 9000, 
         // Limitless Tiers
-        25000, 50000, 100000, 250000, 500000, 1000000, 5000000, 10000000
+        250000, 1000000, 5000000, 25000000, 100000000, 500000000, 2500000000, 10000000000
     ],
     maxLevel: 14,
-    limitlessMaxLevel: 22, // Goes well beyond 90% combined with Prestige
+    limitlessMaxLevel: 22, 
     getEffect: (level) => level * 0.05,
     formatEffect: (val) => `+${(val * 100).toFixed(0)}%`,
   },
@@ -41,7 +41,7 @@ export const UPGRADES: Record<UpgradeType, UpgradeConfig> = {
     costTiers: [
         1, 10, 100, 1000, 10000,
         // Limitless Tiers
-        50000, 100000, 500000, 1000000, 10000000, 50000000, 100000000
+        1000000, 10000000, 100000000, 1000000000, 10000000000, 100000000000, 1000000000000
     ],
     maxLevel: 5,
     limitlessMaxLevel: 12,
@@ -51,7 +51,6 @@ export const UPGRADES: Record<UpgradeType, UpgradeConfig> = {
       if (level < speeds.length) return speeds[level];
       
       // Limitless logic: decays rapidly towards 0
-      // Level 6: 150, Lvl 7: 100, Lvl 8: 75, Lvl 9: 50, Lvl 10: 25, Lvl 11: 10, Lvl 12: 1
       const extraLevels = level - 5;
       const base = 250;
       return Math.max(1, Math.floor(base / Math.pow(2, extraLevels)));
@@ -66,7 +65,7 @@ export const UPGRADES: Record<UpgradeType, UpgradeConfig> = {
     costTiers: [
         1, 10, 100, 1000, 10000,
         // Limitless
-        100000, 500000, 2000000, 10000000, 50000000, 100000000, 500000000, 1000000000
+        2000000, 20000000, 200000000, 2000000000, 20000000000, 200000000000, 2000000000000, 20000000000000
     ],
     maxLevel: 5,
     limitlessMaxLevel: 13,
@@ -74,7 +73,7 @@ export const UPGRADES: Record<UpgradeType, UpgradeConfig> = {
       const multis = [1, 1.25, 1.5, 2.0, 3.0, 5.0];
       if (level < multis.length) return multis[level];
       // Exponential growth for Limitless
-      return Math.pow(2, level - 2); // 5->8x, 6->16x, 7->32x...
+      return Math.pow(2, level - 2); 
     },
     formatEffect: (val) => `${val.toLocaleString()}x`,
   },
@@ -86,7 +85,7 @@ export const UPGRADES: Record<UpgradeType, UpgradeConfig> = {
     costTiers: [
         1, 10, 100, 1000, 10000,
         // Limitless
-        100000, 1000000, 10000000, 100000000, 1000000000, 10000000000
+        10000000, 100000000, 1000000000, 10000000000, 100000000000, 1000000000000
     ],
     maxLevel: 5,
     limitlessMaxLevel: 11,
@@ -106,7 +105,7 @@ export const UPGRADES: Record<UpgradeType, UpgradeConfig> = {
     costTiers: [
         20, 50, 150, 400, 1000, 2500,
         // Limitless
-        10000, 50000, 250000, 1000000, 5000000
+        500000, 2500000, 12500000, 60000000, 300000000
     ], 
     maxLevel: 6,
     limitlessMaxLevel: 11,
@@ -157,7 +156,7 @@ export const UPGRADES: Record<UpgradeType, UpgradeConfig> = {
     costTiers: [5, 10, 15, 25, 50],
     maxLevel: 5,
     isPrestige: true,
-    getEffect: (level) => level * 0.025, // BUFFED from 0.01 to 0.025
+    getEffect: (level) => level * 0.025,
     formatEffect: (val) => `+${(val*100).toFixed(1)}% Base`,
   },
   [UpgradeType.PRESTIGE_FLUX]: {
@@ -168,7 +167,7 @@ export const UPGRADES: Record<UpgradeType, UpgradeConfig> = {
     costTiers: [3, 6, 9, 12, 15],
     maxLevel: 5,
     isPrestige: true,
-    getEffect: (level) => level * 250, // BUFFED from 100 to 250
+    getEffect: (level) => level * 250,
     formatEffect: (val) => `-${val}ms`,
   },
   
@@ -235,24 +234,24 @@ export const UPGRADES: Record<UpgradeType, UpgradeConfig> = {
         100000000000000 // 100T
     ], 
     maxLevel: 10,
-    isPrestige: true, // Note: Handled as Money cost in Shop
+    isPrestige: true,
     getEffect: (level) => {
         if (level === 0) return 1;
         if (level === 1) return 2;
-        return Math.pow(level, 2); // 2x, 4x, 9x, 16x ... 100x
+        return Math.pow(level, 2);
     },
     formatEffect: (val) => `${val}x Reward`,
   },
   [UpgradeType.PRESTIGE_LIMITLESS]: {
     id: UpgradeType.PRESTIGE_LIMITLESS,
     name: "Limitless",
-    description: "Breaks all restrictions. 99% Chance. Instant Speed. Infinite Scaling.",
+    description: "Unlocks extended tiers for Dollar Store upgrades.",
     baseCost: 1000,
     costTiers: [1000],
     maxLevel: 1,
     isPrestige: true,
     getEffect: (level) => level > 0 ? 1 : 0,
-    formatEffect: (val) => val > 0 ? "ACTIVE" : "LOCKED",
+    formatEffect: (val) => val > 0 ? "UNLOCKED" : "LOCKED",
   },
   [UpgradeType.PRESTIGE_MOM]: {
     id: UpgradeType.PRESTIGE_MOM,
@@ -268,10 +267,10 @@ export const UPGRADES: Record<UpgradeType, UpgradeConfig> = {
   [UpgradeType.PRESTIGE_CARE_PACKAGE]: {
     id: UpgradeType.PRESTIGE_CARE_PACKAGE,
     name: "Care Package",
-    description: "Exchange $1M for 25 Void Fragments. One purchase per run.",
+    description: "Exchange $1M for 25 Void Fragments. One time purchase.",
     baseCost: 1000000,
     costTiers: [1000000],
-    maxLevel: 1, // One-time purchase
+    maxLevel: 1, 
     isPrestige: false, // Dollar store
     getEffect: (level) => 25,
     formatEffect: (val) => `+25 VF`,
