@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { GlobalLeaderboard, LeaderboardEntry } from '../types';
 import { LeaderboardService } from '../services/leaderboardService';
-import { X, Trophy, DollarSign, Ban, Heart, Loader2, Info } from 'lucide-react';
+import { X, Trophy, DollarSign, Ban, Heart, Loader2, Info, RefreshCw } from 'lucide-react';
 
 interface Props {
   isOpen: boolean;
@@ -14,13 +14,15 @@ interface Props {
       rich: number;
       mommy: number;
   };
+  onSubmitRun?: () => void;
 }
 
-const LeaderboardModal: React.FC<Props> = ({ isOpen, onClose, playerName, onRegisterName, currentStats }) => {
+const LeaderboardModal: React.FC<Props> = ({ isOpen, onClose, playerName, onRegisterName, currentStats, onSubmitRun }) => {
   const [board, setBoard] = useState<GlobalLeaderboard | null>(null);
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<keyof GlobalLeaderboard>('purist');
   const [tempName, setTempName] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
@@ -40,6 +42,16 @@ const LeaderboardModal: React.FC<Props> = ({ isOpen, onClose, playerName, onRegi
     if (tempName.trim().length > 0) {
         onRegisterName(tempName.trim().substring(0, 15));
     }
+  };
+  
+  const handleSync = async () => {
+      if (!onSubmitRun) return;
+      setIsSubmitting(true);
+      await onSubmitRun();
+      // Artificial delay to show process and allow DB to update slightly
+      await new Promise(r => setTimeout(r, 1000));
+      await fetchBoard();
+      setIsSubmitting(false);
   };
 
   const formatScore = (val: number, type: 'count' | 'money') => {
@@ -195,13 +207,25 @@ const LeaderboardModal: React.FC<Props> = ({ isOpen, onClose, playerName, onRegi
         {/* User Stats Footer */}
         {playerName && currentStats && (
             <div className="p-4 bg-black border-t border-noir-800 flex justify-between items-center text-xs font-mono text-noir-400">
-                <span>YOU: {playerName}</span>
-                <span className="text-amber-500">
-                    {activeTab === 'purist' && `${currentStats.purist} Wins`}
-                    {activeTab === 'prestige' && `Lvl ${currentStats.prestige}`}
-                    {activeTab === 'rich' && formatScore(currentStats.rich, 'money')}
-                    {activeTab === 'mommy' && `${currentStats.mommy}`}
-                </span>
+                <div className="flex flex-col">
+                    <span>YOU: {playerName}</span>
+                    <span className="text-amber-500">
+                        {activeTab === 'purist' && `${currentStats.purist} Wins`}
+                        {activeTab === 'prestige' && `Lvl ${currentStats.prestige}`}
+                        {activeTab === 'rich' && formatScore(currentStats.rich, 'money')}
+                        {activeTab === 'mommy' && `${currentStats.mommy}`}
+                    </span>
+                </div>
+                {onSubmitRun && (
+                    <button 
+                        onClick={handleSync}
+                        disabled={isSubmitting}
+                        className="flex items-center gap-2 px-3 py-1.5 bg-noir-900 border border-noir-700 hover:border-amber-500 hover:text-amber-500 text-noir-300 transition-colors disabled:opacity-50"
+                    >
+                        {isSubmitting ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+                        SYNC RUN
+                    </button>
+                )}
             </div>
         )}
       </div>

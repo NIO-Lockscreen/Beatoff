@@ -58,17 +58,18 @@ const updateLocalBoardState = (board: GlobalLeaderboard, category: keyof GlobalL
 }
 
 // Request Queue to prevent race conditions (Read-Modify-Write overlap)
-let requestQueue = Promise.resolve();
+let requestQueue: Promise<any> = Promise.resolve();
 
-const enqueue = <T>(operation: () => Promise<T>): Promise<T> => {
+// Use function syntax for generic to avoid parser ambiguity with <T,>
+async function enqueue<T>(operation: () => Promise<T>): Promise<T> {
     const next = requestQueue.then(operation).catch(e => {
         console.error("Leaderboard queue error:", e);
         throw e;
     });
-    // @ts-ignore
+    // Store the promise chain without caring about the return value type
     requestQueue = next.catch(() => {});
     return next;
-};
+}
 
 export const LeaderboardService = {
   // STRICT fetch: Throws if network fails or data is invalid.
@@ -84,9 +85,6 @@ export const LeaderboardService = {
       const data = await response.json();
       
       if (!data || typeof data !== 'object') {
-          // If we get null/undefined but 200 OK, it might be a fresh bin. 
-          // However, for safety in submitScores, we usually treat this as default, 
-          // but we must be careful. If it's truly empty (new bin), returning DEFAULT is fine.
           return DEFAULT_BOARD;
       }
 
