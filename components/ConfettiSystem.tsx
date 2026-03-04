@@ -5,6 +5,7 @@ interface ConfettiSystemProps {
   isRichMode?: boolean;
   activeTitle: string | null;
   momPurchases: number;
+  partyPooperEnabled?: boolean;
 }
 
 interface Particle {
@@ -42,7 +43,7 @@ const MOMMY_COLORS = [
   '#fce7f3', // pink-100
 ];
 
-const ConfettiSystem: React.FC<ConfettiSystemProps> = ({ streak, isRichMode = false, activeTitle, momPurchases }) => {
+const ConfettiSystem: React.FC<ConfettiSystemProps> = ({ streak, isRichMode = false, activeTitle, momPurchases, partyPooperEnabled = false }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const particles = useRef<Particle[]>([]);
   const animationId = useRef<number | null>(null);
@@ -52,12 +53,14 @@ const ConfettiSystem: React.FC<ConfettiSystemProps> = ({ streak, isRichMode = fa
   const isRichModeRef = useRef(isRichMode);
   const isMommyModeRef = useRef(activeTitle === 'MOMMY');
   const hasMilfUpgradeRef = useRef(momPurchases >= 10);
+  const partyPooperRef = useRef(partyPooperEnabled);
 
   useEffect(() => {
     isRichModeRef.current = isRichMode;
     isMommyModeRef.current = activeTitle === 'MOMMY';
     hasMilfUpgradeRef.current = momPurchases >= 10;
-  }, [isRichMode, activeTitle, momPurchases]);
+    partyPooperRef.current = partyPooperEnabled;
+  }, [isRichMode, activeTitle, momPurchases, partyPooperEnabled]);
 
   // Animation Loop
   useEffect(() => {
@@ -81,7 +84,7 @@ const ConfettiSystem: React.FC<ConfettiSystemProps> = ({ streak, isRichMode = fa
       // --- TRICKLE LOGIC (Ambient effects) ---
       
       // 1. Rich Mode Trickle
-      if (isRichModeRef.current) {
+      if (!partyPooperRef.current && isRichModeRef.current) {
           if (Math.random() < 0.3) { 
               const isText = Math.random() < 0.3; 
               particles.current.push({
@@ -175,6 +178,7 @@ const ConfettiSystem: React.FC<ConfettiSystemProps> = ({ streak, isRichMode = fa
     } 
     // 2. Handle Streak Increase (Success)
     else if (streak > prevStreak.current) {
+      if (!partyPooperEnabled) {
       const canvas = canvasRef.current;
       if (canvas) {
          const count = Math.min(20 + (streak * 10), 200); 
@@ -209,6 +213,7 @@ const ConfettiSystem: React.FC<ConfettiSystemProps> = ({ streak, isRichMode = fa
             });
           }
       }
+      }
     }
     prevStreak.current = streak;
   }, [streak, isRichMode, activeTitle, momPurchases]);
@@ -217,7 +222,10 @@ const ConfettiSystem: React.FC<ConfettiSystemProps> = ({ streak, isRichMode = fa
     <canvas 
       ref={canvasRef}
       className="fixed inset-0 pointer-events-none z-[60]"
-      style={{ mixBlendMode: (isRichMode || activeTitle === 'MOMMY') ? 'normal' : 'screen' }} 
+      style={{ 
+        mixBlendMode: (isRichMode || activeTitle === 'MOMMY') ? 'normal' : 'screen',
+        display: partyPooperEnabled ? 'none' : undefined
+      }} 
     />
   );
 };

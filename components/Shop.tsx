@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { UpgradeType, PlayerStats } from '../types';
 import { UPGRADES } from '../constants';
-import { Zap, TrendingUp, Clock, Coins, PlayCircle, ShieldCheck, Flame, Ghost, Sparkles, Hourglass, Infinity, Skull, Crown, Heart, Power, Gem, Bot, Package, Syringe, Medal } from 'lucide-react';
+import { Zap, TrendingUp, Clock, Coins, PlayCircle, ShieldCheck, Flame, Ghost, Sparkles, Hourglass, Infinity, Skull, Crown, Heart, Power, Gem, Bot, Package, Syringe, Medal, VolumeX } from 'lucide-react';
 
 interface ShopProps {
   money: number;
@@ -14,6 +14,8 @@ interface ShopProps {
   onToggleAutoFlip: () => void;
   autoBuyEnabled: boolean;
   onToggleAutoBuy: () => void;
+  partyPooperEnabled: boolean;
+  onTogglePartyPooper: () => void;
   seenUpgrades: UpgradeType[];
   onSeen: (id: UpgradeType) => void;
   momPurchases: number;
@@ -42,6 +44,7 @@ const ICONS = {
   [UpgradeType.PRESTIGE_MOM]: Heart,
   [UpgradeType.PRESTIGE_CARE_PACKAGE]: Package,
   [UpgradeType.PRESTIGE_VETERAN]: Medal,
+  [UpgradeType.PRESTIGE_PARTY_POOPER]: VolumeX,
   [UpgradeType.HARD_MODE_BUFF]: Syringe,
 };
 
@@ -56,6 +59,8 @@ const Shop: React.FC<ShopProps> = ({
   onToggleAutoFlip,
   autoBuyEnabled,
   onToggleAutoBuy,
+  partyPooperEnabled,
+  onTogglePartyPooper,
   seenUpgrades,
   onSeen,
   momPurchases,
@@ -102,6 +107,7 @@ const Shop: React.FC<ShopProps> = ({
     if (upgradeId === UpgradeType.PRESTIGE_AUTO && prestigeLevel < 3) return false;
     if (upgradeId === UpgradeType.PRESTIGE_AUTO_BUY && prestigeLevel < 4) return false;
     if (upgradeId === UpgradeType.PRESTIGE_EDGING && prestigeLevel < 5) return false;
+    if (upgradeId === UpgradeType.PRESTIGE_PARTY_POOPER && prestigeLevel < 5) return false;
     if (upgradeId === UpgradeType.PRESTIGE_LIMITLESS && prestigeLevel < 10) return false;
     if (upgradeId === UpgradeType.PRESTIGE_GOLD_DIGGER && prestigeLevel < 16) return false;
     if (upgradeId === UpgradeType.PRESTIGE_MOM && prestigeLevel < 15) return false;
@@ -237,8 +243,10 @@ const Shop: React.FC<ShopProps> = ({
     const isMom = upgrade.id === UpgradeType.PRESTIGE_MOM;
     const isAutoFlipType = (upgrade.id === UpgradeType.AUTO_FLIP || upgrade.id === UpgradeType.PRESTIGE_AUTO);
     const isAutoBuyType = (upgrade.id === UpgradeType.PRESTIGE_AUTO_BUY);
+    const isPartyPooperType = (upgrade.id === UpgradeType.PRESTIGE_PARTY_POOPER);
     const showAutoFlipToggle = isAutoFlipType && currentLevel > 0;
     const showAutoBuyToggle = isAutoBuyType && currentLevel > 0;
+    const showPartyPooperToggle = isPartyPooperType && currentLevel > 0;
     
     const isUnseen = !seenUpgrades.includes(upgrade.id);
     const isHardModeBuff = upgrade.id === UpgradeType.HARD_MODE_BUFF;
@@ -304,6 +312,7 @@ const Shop: React.FC<ShopProps> = ({
         
         <p className={`text-xs mb-3 min-h-[2.5em] leading-relaxed ${isHardModeBuff ? 'text-red-200/70' : isPrestige && !isGoldDigger ? 'text-purple-200/70' : isGoldDigger ? 'text-amber-200/70' : 'text-noir-400'}`}>
           {upgrade.description}
+          {isPartyPooperType && <span className="block mt-1 text-purple-400/60 italic text-[10px]">"The void demands silence."</span>}
         </p>
 
         <div className={`flex justify-between items-center text-xs font-mono mb-3 p-2 rounded ${isPrestige ? 'bg-black/40' : 'bg-noir-900'}`}>
@@ -344,6 +353,23 @@ const Shop: React.FC<ShopProps> = ({
                 >
                     <Power size={14} />
                     {autoBuyEnabled ? "ON" : "OFF"}
+                </button>
+            )}
+
+            {showPartyPooperToggle && (
+                <button
+                    onClick={onTogglePartyPooper}
+                    className={`
+                        flex-1 py-2 px-3 font-mono text-sm font-bold border transition-colors flex items-center justify-center gap-2
+                        ${partyPooperEnabled 
+                            ? 'border-purple-500 text-purple-400 bg-purple-900/20 hover:bg-purple-900/40' 
+                            : 'border-noir-600 text-noir-500 bg-black hover:border-noir-400 hover:text-noir-400'
+                        }
+                    `}
+                    title={partyPooperEnabled ? "Re-enable confetti" : "Disable all confetti"}
+                >
+                    <Power size={14} />
+                    {partyPooperEnabled ? "ON" : "OFF"}
                 </button>
             )}
 

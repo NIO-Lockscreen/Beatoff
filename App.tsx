@@ -44,6 +44,7 @@ const INITIAL_STATE: GameState = {
     [UpgradeType.PRESTIGE_PASSIVE]: 0, [UpgradeType.PRESTIGE_AUTO]: 0, [UpgradeType.PRESTIGE_AUTO_BUY]: 0, 
     [UpgradeType.PRESTIGE_EDGING]: 0, [UpgradeType.PRESTIGE_GOLD_DIGGER]: 0, [UpgradeType.PRESTIGE_LIMITLESS]: 0,
     [UpgradeType.PRESTIGE_MOM]: 0, [UpgradeType.PRESTIGE_CARE_PACKAGE]: 0, [UpgradeType.PRESTIGE_VETERAN]: 0,
+    [UpgradeType.PRESTIGE_PARTY_POOPER]: 0,
     [UpgradeType.HARD_MODE_BUFF]: 0,
   },
   history: [],
@@ -51,6 +52,7 @@ const INITIAL_STATE: GameState = {
   voidFragments: 0,
   autoFlipEnabled: true,
   autoBuyEnabled: false,
+  partyPooperEnabled: false,
   isHardMode: false,
   seenUpgrades: [UpgradeType.CHANCE, UpgradeType.SPEED, UpgradeType.COMBO, UpgradeType.VALUE], 
   playerName: null,
@@ -147,6 +149,14 @@ const App: React.FC = () => {
         if (typeof loaded.voidFragments === 'undefined') loaded.voidFragments = 0;
         if (typeof loaded.autoFlipEnabled === 'undefined') loaded.autoFlipEnabled = true;
         if (typeof loaded.autoBuyEnabled === 'undefined') loaded.autoBuyEnabled = false;
+        if (typeof loaded.partyPooperEnabled === 'undefined') loaded.partyPooperEnabled = false;
+        // Retroactive unlock: players at prestige 5+ automatically receive the Party Pooper upgrade
+        if (typeof loaded.upgrades[UpgradeType.PRESTIGE_PARTY_POOPER] === 'undefined') {
+            loaded.upgrades[UpgradeType.PRESTIGE_PARTY_POOPER] = 0;
+        }
+        if ((loaded.prestigeLevel || 0) >= 5 && loaded.upgrades[UpgradeType.PRESTIGE_PARTY_POOPER] === 0) {
+            loaded.upgrades[UpgradeType.PRESTIGE_PARTY_POOPER] = 1;
+        }
         if (typeof loaded.isHardMode === 'undefined') loaded.isHardMode = false;
         
         if (!loaded.seenUpgrades) {
@@ -609,6 +619,7 @@ const App: React.FC = () => {
 
   const toggleAutoFlip = () => setGameState(p => ({ ...p, autoFlipEnabled: !p.autoFlipEnabled }));
   const toggleAutoBuy = () => setGameState(p => ({ ...p, autoBuyEnabled: !p.autoBuyEnabled }));
+  const togglePartyPooper = () => setGameState(p => ({ ...p, partyPooperEnabled: !p.partyPooperEnabled }));
   const handleSeen = (id: UpgradeType) => {
       if (!gameState.seenUpgrades.includes(id)) {
           setGameState(p => ({ ...p, seenUpgrades: [...p.seenUpgrades, id] }));
@@ -711,7 +722,12 @@ const App: React.FC = () => {
       
       <div className="bg-noise pointer-events-none fixed inset-0 z-0" />
       <div className="bg-vignette pointer-events-none fixed inset-0 z-0" />
-      <ConfettiSystem streak={gameState.streak} isRichMode={gameState.money > 1e6 && gameState.activeTitle === 'RICH'} activeTitle={gameState.activeTitle} momPurchases={gameState.stats.momPurchases} />
+      <ConfettiSystem streak={gameState.streak} isRichMode={gameState.money > 1e6 && gameState.activeTitle === 'RICH'} activeTitle={gameState.activeTitle} momPurchases={gameState.stats.momPurchases} partyPooperEnabled={gameState.partyPooperEnabled} />
+
+      {/* Party Pooper dark overlay */}
+      {gameState.partyPooperEnabled && (gameState.upgrades[UpgradeType.PRESTIGE_PARTY_POOPER] || 0) > 0 && (
+        <div className="fixed inset-0 bg-black/30 pointer-events-none z-[55] transition-opacity duration-500" />
+      )}
       
       {gameState.activeTitle && (
           <div onClick={() => setShowTitleSelector(true)} className={`fixed md:top-4 top-28 left-1/2 -translate-x-1/2 z-[60] cursor-pointer group transition-opacity duration-300 ${!isFundsVisible ? 'opacity-0 pointer-events-none md:opacity-100 md:pointer-events-auto' : 'opacity-100'}`}>
@@ -784,7 +800,7 @@ const App: React.FC = () => {
 
       {celebration && (
         <div className={`pointer-events-none fixed inset-0 z-[90] flex items-center justify-center flex-col overflow-hidden`}>
-            {celebration.level >= 5 && <div className="absolute inset-0 bg-white/20 animate-flash mix-blend-overlay"></div>}
+            {celebration.level >= 5 && !gameState.partyPooperEnabled && <div className="absolute inset-0 bg-white/20 animate-flash mix-blend-overlay"></div>}
             <div className={`${celebration.level >= 8 ? 'animate-shake' : ''} flex flex-col items-center justify-center px-4`}>
                 <h2 key={celebration.id} className={`font-mono font-bold drop-shadow-[0_0_15px_rgba(251,191,36,0.6)] text-center transition-transform duration-300 max-w-[90vw] break-words leading-tight ${celebration.level >= 9 ? 'text-7xl md:text-9xl text-amber-500 animate-scale-slam' : celebration.level >= 5 ? 'text-6xl md:text-8xl text-amber-400 animate-pop-up' : 'text-4xl md:text-6xl text-amber-200/80 animate-pop-in-up'}`}>
                     {celebration.text}
@@ -906,6 +922,8 @@ const App: React.FC = () => {
         onToggleAutoFlip={toggleAutoFlip}
         autoBuyEnabled={gameState.autoBuyEnabled}
         onToggleAutoBuy={toggleAutoBuy}
+        partyPooperEnabled={gameState.partyPooperEnabled}
+        onTogglePartyPooper={togglePartyPooper}
         seenUpgrades={gameState.seenUpgrades}
         onSeen={handleSeen}
         momPurchases={gameState.stats.momPurchases}

@@ -286,6 +286,17 @@ export const UPGRADES: Record<UpgradeType, UpgradeConfig> = {
     getEffect: (level) => level > 0 ? 1 : 0,
     formatEffect: (val) => val > 0 ? "ACTIVE" : "LOCKED",
   },
+  [UpgradeType.PRESTIGE_PARTY_POOPER]: {
+    id: UpgradeType.PRESTIGE_PARTY_POOPER,
+    name: "Party Pooper",
+    description: "Silence the void. Disables all confetti and celebration effects.",
+    baseCost: 1,
+    costTiers: [1],
+    maxLevel: 1,
+    isPrestige: true,
+    getEffect: (level) => level > 0 ? 1 : 0,
+    formatEffect: (val) => val > 0 ? "SILENCED" : "LOCKED",
+  },
   [UpgradeType.HARD_MODE_BUFF]: {
     id: UpgradeType.HARD_MODE_BUFF,
     name: "Void Injection",
