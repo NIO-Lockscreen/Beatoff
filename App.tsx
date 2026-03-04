@@ -434,11 +434,6 @@ const App: React.FC = () => {
              updates.push({ category: 'rich', entry: { name: gameState.playerName, score: gameState.stats.highestCash, date: Date.now() } });
              
              if (updates.length > 0) LeaderboardService.submitScores(updates);
-             // Auto-open leaderboard after a short win celebration delay
-             window.setTimeout(() => setShowLeaderboard(true), 2200);
-        } else if (!gameState.playerName) {
-             // No name yet — open leaderboard so they can register
-             window.setTimeout(() => setShowLeaderboard(true), 2200);
         }
     }
   }, [gameState.streak, hasWon, gameState.isHardMode, gameState.prestigeLevel, gameState.playerName, gameState.hasCheated, gameState.isPuristRun, gameState.stats]);
@@ -547,11 +542,6 @@ const App: React.FC = () => {
 
           newState.upgrades[id] = (prev.upgrades[id] || 0) + 1;
           
-          // Auto-start flipping immediately when auto flip upgrades are purchased
-          if (id === UpgradeType.AUTO_FLIP || id === UpgradeType.PRESTIGE_AUTO) {
-              newState.autoFlipEnabled = true;
-          }
-          
           if (id === UpgradeType.PRESTIGE_MOM) {
               newState.stats.momPurchases++;
           }
@@ -648,11 +638,6 @@ const App: React.FC = () => {
            if (cheatCodeBuffer.current === "ZEX") {
                setGameState(p => ({ ...p, prestigeLevel: 199, hasCheated: true }));
                AudioService.playWin();
-               cheatCodeBuffer.current = "";
-           }
-           // DEBUG: type "mom" to trigger the mom reset modal
-           if (cheatCodeBuffer.current === "MOM") {
-               triggerMomEvent();
                cheatCodeBuffer.current = "";
            }
         }
@@ -822,7 +807,7 @@ const App: React.FC = () => {
                 </div>
             ) : (
                 <div className="flex flex-col items-center gap-16 w-full max-w-md z-10">
-                    <div className="relative w-64 h-64 perspective-1000 flex items-center justify-center cursor-pointer select-none" onClick={() => !hasWon && !isFlipping && handleFlip(false)} title="Click to flip">
+                    <div className="relative w-64 h-64 perspective-1000 flex items-center justify-center">
                         <div className="absolute bottom-10 w-32 h-4 bg-black/40 blur-xl rounded-[100%]" style={{ animation: isFlipping ? `shadowScale ${Math.max(1, UPGRADES[UpgradeType.SPEED].getEffect(gameState.upgrades[UpgradeType.SPEED]) - (UPGRADES[UpgradeType.PRESTIGE_FLUX].getEffect(gameState.upgrades[UpgradeType.PRESTIGE_FLUX] || 0) * 250))}ms cubic-bezier(0.5, 0, 0.5, 1) forwards` : 'none' }}></div>
                         <div className="w-48 h-48 relative preserve-3d" style={{ animation: isFlipping ? `tossHeight ${Math.max(1, UPGRADES[UpgradeType.SPEED].getEffect(gameState.upgrades[UpgradeType.SPEED]) - (UPGRADES[UpgradeType.PRESTIGE_FLUX].getEffect(gameState.upgrades[UpgradeType.PRESTIGE_FLUX] || 0) * 250))}ms cubic-bezier(0.5, 0, 0.5, 1) forwards` : 'none' }}>
                             <div className="w-full h-full relative preserve-3d" style={{ animation: isFlipping ? `tossSpin ${Math.max(1, UPGRADES[UpgradeType.SPEED].getEffect(gameState.upgrades[UpgradeType.SPEED]) - (UPGRADES[UpgradeType.PRESTIGE_FLUX].getEffect(gameState.upgrades[UpgradeType.PRESTIGE_FLUX] || 0) * 250))}ms linear infinite` : 'none', transform: !isFlipping && coinSide ? (coinSide === 'T' ? 'rotateX(180deg)' : 'rotateX(0deg)') : undefined }}>
