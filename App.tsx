@@ -196,6 +196,14 @@ const App: React.FC = () => {
 
   const currentGoal = gameState.isHardMode ? getHardModeGoal() : WINNING_STREAK;
 
+  // ── Derived: has the player ever won at least one round? ──────────────────
+  // totalPrestiges increments on every ascend (which requires a win), and
+  // hardModeWins also tracks wins, so either being > 0 means they've won.
+  const hasEverWon =
+    hasWon ||
+    gameState.stats.totalPrestiges > 0 ||
+    gameState.stats.hardModeWins > 0;
+
   useEffect(() => {
     secureSave(SAVE_KEY, gameState);
     saveMetaStats(gameState.stats);
@@ -409,6 +417,22 @@ const App: React.FC = () => {
     }, duration) as unknown as number;
 
   }, [isFlipping, hasWon, showMomModal, calculateChance, gameState.upgrades, gameState.prestigeLevel, gameState.isHardMode]);
+
+  // ── Click-anywhere-to-flip ─────────────────────────────────────────────────
+  // Fires on clicks within the main game panel. Skipped if the click target
+  // (or any of its ancestors) is an interactive element or a modal/overlay.
+  const INTERACTIVE_SELECTOR =
+    'button, a, input, select, textarea, label, [role="button"], [role="dialog"], [role="listbox"], [data-no-flip]';
+
+  const handleGameAreaClick = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      const target = e.target as HTMLElement;
+      // Bail out when clicking anything interactive
+      if (target.closest(INTERACTIVE_SELECTOR)) return;
+      handleFlip(false);
+    },
+    [handleFlip]
+  );
 
   // Win Detection
   useEffect(() => {
@@ -674,6 +698,14 @@ const App: React.FC = () => {
       return (map[key] || key) + suffix;
   };
 
+  // Whether any blocking overlay is visible (prevents stray clicks from flipping)
+  const anyModalOpen =
+    showModal ||
+    showLeaderboard ||
+    showMomModal.show ||
+    showHardModePrompt ||
+    showTitleSelector;
+
   return (
     <div className={`min-h-screen md:h-screen md:overflow-hidden overflow-y-auto bg-noir-950 text-noir-200 font-sans flex flex-col md:flex-row relative transition-colors duration-200 ${celebration && celebration.level >= 8 ? 'bg-noir-900' : ''}`}>
       
@@ -708,8 +740,9 @@ const App: React.FC = () => {
         </div>
       )}
 
+      {/* ── Title selector modal ───────────────────────────────────────────── */}
       {showTitleSelector && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in" onClick={() => setShowTitleSelector(false)}>
+          <div data-no-flip className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in" onClick={() => setShowTitleSelector(false)}>
               <div className="bg-noir-900 border border-noir-700 p-6 max-w-sm w-full shadow-2xl" onClick={e => e.stopPropagation()}>
                   <h3 className="text-xl font-mono font-bold text-white mb-4 flex items-center gap-2"><Crown size={20} className="text-amber-500" /> Select Title</h3>
                   <div className="space-y-2 max-h-[60vh] overflow-y-auto">
@@ -724,8 +757,9 @@ const App: React.FC = () => {
           </div>
       )}
       
+      {/* ── Hard mode prompt modal ─────────────────────────────────────────── */}
       {showHardModePrompt && (
-          <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/90 backdrop-blur-md p-6 animate-fade-in">
+          <div data-no-flip className="fixed inset-0 z-[200] flex items-center justify-center bg-black/90 backdrop-blur-md p-6 animate-fade-in">
               <div className="max-w-lg w-full bg-noir-950 border border-red-900 p-8 shadow-[0_0_50px_rgba(220,38,38,0.2)] text-center">
                   <Skull size={48} className="text-red-500 mx-auto mb-6 animate-pulse" />
                   <h2 className="text-3xl font-mono font-bold text-white mb-4">ESCALATION PROTOCOL</h2>
@@ -760,8 +794,9 @@ const App: React.FC = () => {
         </div>
       )}
       
+      {/* ── Mom modal ─────────────────────────────────────────────────────── */}
       {showMomModal.show && (
-          <div className="fixed inset-0 z-[200] bg-black flex items-center justify-center p-6 animate-fade-in">
+          <div data-no-flip className="fixed inset-0 z-[200] bg-black flex items-center justify-center p-6 animate-fade-in">
               <div className="max-w-md w-full text-center space-y-8">
                   <div className="mx-auto w-24 h-24 rounded-full bg-pink-500/20 flex items-center justify-center mb-6 animate-pulse"><Heart size={48} className="text-pink-400" /></div>
                   <h3 className="text-3xl font-mono font-bold text-white mb-4">A Message for You</h3>
@@ -770,7 +805,11 @@ const App: React.FC = () => {
           </div>
       )}
 
-      <div className="flex-1 flex flex-col relative min-h-[600px] md:min-h-0 z-10">
+      {/* ── Main game panel (click anywhere here to flip) ─────────────────── */}
+      <div
+        className="flex-1 flex flex-col relative min-h-[600px] md:min-h-0 z-10"
+        onClick={anyModalOpen ? undefined : handleGameAreaClick}
+      >
         <header className="p-6 border-b border-noir-800/50 flex justify-between items-end bg-noir-950/30 backdrop-blur-sm relative z-50">
             <div>
                 <h1 className="text-3xl font-mono font-bold tracking-tighter text-white drop-shadow-md">BEAT THE <span className="text-amber-500">ODDS</span></h1>
@@ -844,7 +883,8 @@ const App: React.FC = () => {
                         <Skull size={20} />
                     </button>
                  )}
-                 {(gameState.playerName || hasWon) && (
+                 {/* ── Leaderboard button: visible once the player has ever won ── */}
+                 {(gameState.playerName || hasEverWon) && (
                      <button onClick={() => setShowLeaderboard(true)} className="p-2 text-amber-500 hover:text-white transition-colors hover:bg-amber-900/50 rounded-full cursor-pointer animate-fade-in" title="Leaderboard"><List size={20} /></button>
                  )}
                  <button onClick={toggleMute} className="p-2 text-noir-500 hover:text-white transition-colors hover:bg-noir-900 rounded-full cursor-pointer" title={muted ? "Unmute" : "Mute"}>{muted ? <VolumeX size={20} /> : <Volume2 size={20} />}</button>
