@@ -23,7 +23,8 @@ export enum UpgradeType {
   PRESTIGE_MOM = 'PRESTIGE_MOM', // The forbidden button
   PRESTIGE_CARE_PACKAGE = 'PRESTIGE_CARE_PACKAGE', // Dollar store upgrade
   PRESTIGE_VETERAN = 'PRESTIGE_VETERAN', // Unlocked after Hard Mode win
-  
+  PRESTIGE_PARTY_POOPER = 'PRESTIGE_PARTY_POOPER', // Disable confetti effects
+
   // Hard Mode
   HARD_MODE_BUFF = 'HARD_MODE_BUFF', // +20% for one flip
 }
@@ -73,6 +74,7 @@ export interface GameState {
   voidFragments: number; // Currency for prestige shop
   autoFlipEnabled: boolean; // Toggle for auto flippers
   autoBuyEnabled: boolean; // Toggle for auto buyer
+  partyPooperEnabled: boolean; // Toggle for Party Pooper (disables confetti)
   
   // Hard Mode
   isHardMode: boolean; // 70% Cap, 15 Streak goal

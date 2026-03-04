@@ -44,6 +44,7 @@ const INITIAL_STATE: GameState = {
     [UpgradeType.PRESTIGE_PASSIVE]: 0, [UpgradeType.PRESTIGE_AUTO]: 0, [UpgradeType.PRESTIGE_AUTO_BUY]: 0, 
     [UpgradeType.PRESTIGE_EDGING]: 0, [UpgradeType.PRESTIGE_GOLD_DIGGER]: 0, [UpgradeType.PRESTIGE_LIMITLESS]: 0,
     [UpgradeType.PRESTIGE_MOM]: 0, [UpgradeType.PRESTIGE_CARE_PACKAGE]: 0, [UpgradeType.PRESTIGE_VETERAN]: 0,
+    [UpgradeType.PRESTIGE_PARTY_POOPER]: 0,
     [UpgradeType.HARD_MODE_BUFF]: 0,
   },
   history: [],
@@ -51,6 +52,7 @@ const INITIAL_STATE: GameState = {
   voidFragments: 0,
   autoFlipEnabled: true,
   autoBuyEnabled: false,
+  partyPooperEnabled: false,
   isHardMode: false,
   seenUpgrades: [UpgradeType.CHANCE, UpgradeType.SPEED, UpgradeType.COMBO, UpgradeType.VALUE], 
   playerName: null,
@@ -147,6 +149,14 @@ const App: React.FC = () => {
         if (typeof loaded.voidFragments === 'undefined') loaded.voidFragments = 0;
         if (typeof loaded.autoFlipEnabled === 'undefined') loaded.autoFlipEnabled = true;
         if (typeof loaded.autoBuyEnabled === 'undefined') loaded.autoBuyEnabled = false;
+        if (typeof loaded.partyPooperEnabled === 'undefined') loaded.partyPooperEnabled = false;
+        // Retroactive unlock: players at prestige 5+ automatically receive the Party Pooper upgrade
+        if (typeof loaded.upgrades[UpgradeType.PRESTIGE_PARTY_POOPER] === 'undefined') {
+            loaded.upgrades[UpgradeType.PRESTIGE_PARTY_POOPER] = 0;
+        }
+        if ((loaded.prestigeLevel || 0) >= 5 && loaded.upgrades[UpgradeType.PRESTIGE_PARTY_POOPER] === 0) {
+            loaded.upgrades[UpgradeType.PRESTIGE_PARTY_POOPER] = 1;
+        }
         if (typeof loaded.isHardMode === 'undefined') loaded.isHardMode = false;
         
         if (!loaded.seenUpgrades) {
@@ -195,6 +205,14 @@ const App: React.FC = () => {
   }, [gameState.stats.hardModeWins]);
 
   const currentGoal = gameState.isHardMode ? getHardModeGoal() : WINNING_STREAK;
+
+  // ── Derived: has the player ever won at least one round? ──────────────────
+  // totalPrestiges increments on every ascend (which requires a win), and
+  // hardModeWins also tracks wins, so either being > 0 means they've won.
+  const hasEverWon =
+    hasWon ||
+    gameState.stats.totalPrestiges > 0 ||
+    gameState.stats.hardModeWins > 0;
 
   useEffect(() => {
     secureSave(SAVE_KEY, gameState);
@@ -410,6 +428,22 @@ const App: React.FC = () => {
 
   }, [isFlipping, hasWon, showMomModal, calculateChance, gameState.upgrades, gameState.prestigeLevel, gameState.isHardMode]);
 
+  // ── Click-anywhere-to-flip ─────────────────────────────────────────────────
+  // Fires on clicks within the main game panel. Skipped if the click target
+  // (or any of its ancestors) is an interactive element or a modal/overlay.
+  const INTERACTIVE_SELECTOR =
+    'button, a, input, select, textarea, label, [role="button"], [role="dialog"], [role="listbox"], [data-no-flip]';
+
+  const handleGameAreaClick = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      const target = e.target as HTMLElement;
+      // Bail out when clicking anything interactive
+      if (target.closest(INTERACTIVE_SELECTOR)) return;
+      handleFlip(false);
+    },
+    [handleFlip]
+  );
+
   // Win Detection
   useEffect(() => {
     const goal = gameState.isHardMode ? HARD_MODE_WINNING_STREAK + (gameState.stats.hardModeWins * 5) : WINNING_STREAK;
@@ -434,11 +468,6 @@ const App: React.FC = () => {
              updates.push({ category: 'rich', entry: { name: gameState.playerName, score: gameState.stats.highestCash, date: Date.now() } });
              
              if (updates.length > 0) LeaderboardService.submitScores(updates);
-             // Auto-open leaderboard after a short win celebration delay
-             window.setTimeout(() => setShowLeaderboard(true), 2200);
-        } else if (!gameState.playerName) {
-             // No name yet — open leaderboard so they can register
-             window.setTimeout(() => setShowLeaderboard(true), 2200);
         }
     }
   }, [gameState.streak, hasWon, gameState.isHardMode, gameState.prestigeLevel, gameState.playerName, gameState.hasCheated, gameState.isPuristRun, gameState.stats]);
@@ -547,11 +576,6 @@ const App: React.FC = () => {
 
           newState.upgrades[id] = (prev.upgrades[id] || 0) + 1;
           
-          // Auto-start flipping immediately when auto flip upgrades are purchased
-          if (id === UpgradeType.AUTO_FLIP || id === UpgradeType.PRESTIGE_AUTO) {
-              newState.autoFlipEnabled = true;
-          }
-          
           if (id === UpgradeType.PRESTIGE_MOM) {
               newState.stats.momPurchases++;
           }
@@ -595,6 +619,7 @@ const App: React.FC = () => {
 
   const toggleAutoFlip = () => setGameState(p => ({ ...p, autoFlipEnabled: !p.autoFlipEnabled }));
   const toggleAutoBuy = () => setGameState(p => ({ ...p, autoBuyEnabled: !p.autoBuyEnabled }));
+  const togglePartyPooper = () => setGameState(p => ({ ...p, partyPooperEnabled: !p.partyPooperEnabled }));
   const handleSeen = (id: UpgradeType) => {
       if (!gameState.seenUpgrades.includes(id)) {
           setGameState(p => ({ ...p, seenUpgrades: [...p.seenUpgrades, id] }));
@@ -650,11 +675,6 @@ const App: React.FC = () => {
                AudioService.playWin();
                cheatCodeBuffer.current = "";
            }
-           // DEBUG: type "mom" to trigger the mom reset modal
-           if (cheatCodeBuffer.current === "MOM") {
-               triggerMomEvent();
-               cheatCodeBuffer.current = "";
-           }
         }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -689,12 +709,25 @@ const App: React.FC = () => {
       return (map[key] || key) + suffix;
   };
 
+  // Whether any blocking overlay is visible (prevents stray clicks from flipping)
+  const anyModalOpen =
+    showModal ||
+    showLeaderboard ||
+    showMomModal.show ||
+    showHardModePrompt ||
+    showTitleSelector;
+
   return (
     <div className={`min-h-screen md:h-screen md:overflow-hidden overflow-y-auto bg-noir-950 text-noir-200 font-sans flex flex-col md:flex-row relative transition-colors duration-200 ${celebration && celebration.level >= 8 ? 'bg-noir-900' : ''}`}>
       
       <div className="bg-noise pointer-events-none fixed inset-0 z-0" />
       <div className="bg-vignette pointer-events-none fixed inset-0 z-0" />
-      <ConfettiSystem streak={gameState.streak} isRichMode={gameState.money > 1e6 && gameState.activeTitle === 'RICH'} activeTitle={gameState.activeTitle} momPurchases={gameState.stats.momPurchases} />
+      <ConfettiSystem streak={gameState.streak} isRichMode={gameState.money > 1e6 && gameState.activeTitle === 'RICH'} activeTitle={gameState.activeTitle} momPurchases={gameState.stats.momPurchases} partyPooperEnabled={gameState.partyPooperEnabled} />
+
+      {/* Party Pooper dark overlay */}
+      {gameState.partyPooperEnabled && (gameState.upgrades[UpgradeType.PRESTIGE_PARTY_POOPER] || 0) > 0 && (
+        <div className="fixed inset-0 bg-black/30 pointer-events-none z-[55] transition-opacity duration-500" />
+      )}
       
       {gameState.activeTitle && (
           <div onClick={() => setShowTitleSelector(true)} className={`fixed md:top-4 top-28 left-1/2 -translate-x-1/2 z-[60] cursor-pointer group transition-opacity duration-300 ${!isFundsVisible ? 'opacity-0 pointer-events-none md:opacity-100 md:pointer-events-auto' : 'opacity-100'}`}>
@@ -723,8 +756,9 @@ const App: React.FC = () => {
         </div>
       )}
 
+      {/* ── Title selector modal ───────────────────────────────────────────── */}
       {showTitleSelector && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in" onClick={() => setShowTitleSelector(false)}>
+          <div data-no-flip className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in" onClick={() => setShowTitleSelector(false)}>
               <div className="bg-noir-900 border border-noir-700 p-6 max-w-sm w-full shadow-2xl" onClick={e => e.stopPropagation()}>
                   <h3 className="text-xl font-mono font-bold text-white mb-4 flex items-center gap-2"><Crown size={20} className="text-amber-500" /> Select Title</h3>
                   <div className="space-y-2 max-h-[60vh] overflow-y-auto">
@@ -739,8 +773,9 @@ const App: React.FC = () => {
           </div>
       )}
       
+      {/* ── Hard mode prompt modal ─────────────────────────────────────────── */}
       {showHardModePrompt && (
-          <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/90 backdrop-blur-md p-6 animate-fade-in">
+          <div data-no-flip className="fixed inset-0 z-[200] flex items-center justify-center bg-black/90 backdrop-blur-md p-6 animate-fade-in">
               <div className="max-w-lg w-full bg-noir-950 border border-red-900 p-8 shadow-[0_0_50px_rgba(220,38,38,0.2)] text-center">
                   <Skull size={48} className="text-red-500 mx-auto mb-6 animate-pulse" />
                   <h2 className="text-3xl font-mono font-bold text-white mb-4">ESCALATION PROTOCOL</h2>
@@ -765,7 +800,7 @@ const App: React.FC = () => {
 
       {celebration && (
         <div className={`pointer-events-none fixed inset-0 z-[90] flex items-center justify-center flex-col overflow-hidden`}>
-            {celebration.level >= 5 && <div className="absolute inset-0 bg-white/20 animate-flash mix-blend-overlay"></div>}
+            {celebration.level >= 5 && !gameState.partyPooperEnabled && <div className="absolute inset-0 bg-white/20 animate-flash mix-blend-overlay"></div>}
             <div className={`${celebration.level >= 8 ? 'animate-shake' : ''} flex flex-col items-center justify-center px-4`}>
                 <h2 key={celebration.id} className={`font-mono font-bold drop-shadow-[0_0_15px_rgba(251,191,36,0.6)] text-center transition-transform duration-300 max-w-[90vw] break-words leading-tight ${celebration.level >= 9 ? 'text-7xl md:text-9xl text-amber-500 animate-scale-slam' : celebration.level >= 5 ? 'text-6xl md:text-8xl text-amber-400 animate-pop-up' : 'text-4xl md:text-6xl text-amber-200/80 animate-pop-in-up'}`}>
                     {celebration.text}
@@ -775,8 +810,9 @@ const App: React.FC = () => {
         </div>
       )}
       
+      {/* ── Mom modal ─────────────────────────────────────────────────────── */}
       {showMomModal.show && (
-          <div className="fixed inset-0 z-[200] bg-black flex items-center justify-center p-6 animate-fade-in">
+          <div data-no-flip className="fixed inset-0 z-[200] bg-black flex items-center justify-center p-6 animate-fade-in">
               <div className="max-w-md w-full text-center space-y-8">
                   <div className="mx-auto w-24 h-24 rounded-full bg-pink-500/20 flex items-center justify-center mb-6 animate-pulse"><Heart size={48} className="text-pink-400" /></div>
                   <h3 className="text-3xl font-mono font-bold text-white mb-4">A Message for You</h3>
@@ -785,7 +821,11 @@ const App: React.FC = () => {
           </div>
       )}
 
-      <div className="flex-1 flex flex-col relative min-h-[600px] md:min-h-0 z-10">
+      {/* ── Main game panel (click anywhere here to flip) ─────────────────── */}
+      <div
+        className="flex-1 flex flex-col relative min-h-[600px] md:min-h-0 z-10"
+        onClick={anyModalOpen ? undefined : handleGameAreaClick}
+      >
         <header className="p-6 border-b border-noir-800/50 flex justify-between items-end bg-noir-950/30 backdrop-blur-sm relative z-50">
             <div>
                 <h1 className="text-3xl font-mono font-bold tracking-tighter text-white drop-shadow-md">BEAT THE <span className="text-amber-500">ODDS</span></h1>
@@ -822,7 +862,7 @@ const App: React.FC = () => {
                 </div>
             ) : (
                 <div className="flex flex-col items-center gap-16 w-full max-w-md z-10">
-                    <div className="relative w-64 h-64 perspective-1000 flex items-center justify-center cursor-pointer select-none" onClick={() => !hasWon && !isFlipping && handleFlip(false)} title="Click to flip">
+                    <div className="relative w-64 h-64 perspective-1000 flex items-center justify-center">
                         <div className="absolute bottom-10 w-32 h-4 bg-black/40 blur-xl rounded-[100%]" style={{ animation: isFlipping ? `shadowScale ${Math.max(1, UPGRADES[UpgradeType.SPEED].getEffect(gameState.upgrades[UpgradeType.SPEED]) - (UPGRADES[UpgradeType.PRESTIGE_FLUX].getEffect(gameState.upgrades[UpgradeType.PRESTIGE_FLUX] || 0) * 250))}ms cubic-bezier(0.5, 0, 0.5, 1) forwards` : 'none' }}></div>
                         <div className="w-48 h-48 relative preserve-3d" style={{ animation: isFlipping ? `tossHeight ${Math.max(1, UPGRADES[UpgradeType.SPEED].getEffect(gameState.upgrades[UpgradeType.SPEED]) - (UPGRADES[UpgradeType.PRESTIGE_FLUX].getEffect(gameState.upgrades[UpgradeType.PRESTIGE_FLUX] || 0) * 250))}ms cubic-bezier(0.5, 0, 0.5, 1) forwards` : 'none' }}>
                             <div className="w-full h-full relative preserve-3d" style={{ animation: isFlipping ? `tossSpin ${Math.max(1, UPGRADES[UpgradeType.SPEED].getEffect(gameState.upgrades[UpgradeType.SPEED]) - (UPGRADES[UpgradeType.PRESTIGE_FLUX].getEffect(gameState.upgrades[UpgradeType.PRESTIGE_FLUX] || 0) * 250))}ms linear infinite` : 'none', transform: !isFlipping && coinSide ? (coinSide === 'T' ? 'rotateX(180deg)' : 'rotateX(0deg)') : undefined }}>
@@ -859,7 +899,8 @@ const App: React.FC = () => {
                         <Skull size={20} />
                     </button>
                  )}
-                 {(gameState.playerName || hasWon) && (
+                 {/* ── Leaderboard button: visible once the player has ever won ── */}
+                 {(gameState.playerName || hasEverWon) && (
                      <button onClick={() => setShowLeaderboard(true)} className="p-2 text-amber-500 hover:text-white transition-colors hover:bg-amber-900/50 rounded-full cursor-pointer animate-fade-in" title="Leaderboard"><List size={20} /></button>
                  )}
                  <button onClick={toggleMute} className="p-2 text-noir-500 hover:text-white transition-colors hover:bg-noir-900 rounded-full cursor-pointer" title={muted ? "Unmute" : "Mute"}>{muted ? <VolumeX size={20} /> : <Volume2 size={20} />}</button>
@@ -881,6 +922,8 @@ const App: React.FC = () => {
         onToggleAutoFlip={toggleAutoFlip}
         autoBuyEnabled={gameState.autoBuyEnabled}
         onToggleAutoBuy={toggleAutoBuy}
+        partyPooperEnabled={gameState.partyPooperEnabled}
+        onTogglePartyPooper={togglePartyPooper}
         seenUpgrades={gameState.seenUpgrades}
         onSeen={handleSeen}
         momPurchases={gameState.stats.momPurchases}
