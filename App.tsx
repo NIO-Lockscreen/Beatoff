@@ -9,6 +9,17 @@ import { AudioService } from './services/audioService';
 import { LeaderboardService } from './services/leaderboardService';
 import { HelpCircle, Trash2, Trophy, Volume2, VolumeX, Sparkles, Heart, List, Crown, Skull, Syringe } from 'lucide-react';
 
+interface MomModalState {
+    show: boolean;
+    text: string;
+}
+
+interface CelebrationState {
+    text: string;
+    level: number;
+    id: number;
+}
+
 const CELEBRATION_MESSAGES = [
   "", "", "LUCKY", "HEATING UP", "UNREAL", "DEFYING ODDS", "SYSTEM ERROR", "IMPOSSIBLE", 
   "DESTINY", "DIVINE", "LEGENDARY", "BEYOND", "TRANSCENDENT", "OMNISCIENT", "THE END?", 
@@ -174,10 +185,10 @@ const App: React.FC = () => {
   const [coinSide, setCoinSide] = useState<'H' | 'T' | null>(null);
   const [showModal, setShowModal] = useState(false);
   const [showLeaderboard, setShowLeaderboard] = useState(false);
-  const [showMomModal, setShowMomModal] = useState<{show: boolean, text: string}>({show: false, text: ""});
+  const [showMomModal, setShowMomModal] = useState<MomModalState>({show: false, text: ""});
   const [showHardModePrompt, setShowHardModePrompt] = useState(false);
   const [hasWon, setHasWon] = useState(false);
-  const [celebration, setCelebration] = useState<{text: string, level: number, id: number} | null>(null);
+  const [celebration, setCelebration] = useState<CelebrationState | null>(null);
   const [muted, setMuted] = useState(true);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [showTitleSelector, setShowTitleSelector] = useState(false);
@@ -189,6 +200,7 @@ const App: React.FC = () => {
   const celebrationTimeoutRef = useRef<number | undefined>(undefined);
   const deleteTimeoutRef = useRef<number | undefined>(undefined);
   const cheatCodeBuffer = useRef<string>("");
+  const isResettingRef = useRef(false);
 
   const getHardModeGoal = useCallback(() => {
       return HARD_MODE_WINNING_STREAK + (gameState.stats.hardModeWins * 5);
@@ -197,6 +209,7 @@ const App: React.FC = () => {
   const currentGoal = gameState.isHardMode ? getHardModeGoal() : WINNING_STREAK;
 
   useEffect(() => {
+    if (isResettingRef.current) return;
     secureSave(SAVE_KEY, gameState);
     saveMetaStats(gameState.stats);
   }, [gameState]);
@@ -435,6 +448,7 @@ const App: React.FC = () => {
              
              if (updates.length > 0) LeaderboardService.submitScores(updates);
         }
+        setShowLeaderboard(true);
     }
   }, [gameState.streak, hasWon, gameState.isHardMode, gameState.prestigeLevel, gameState.playerName, gameState.hasCheated, gameState.isPuristRun, gameState.stats]);
 
@@ -546,6 +560,10 @@ const App: React.FC = () => {
               newState.stats.momPurchases++;
           }
           
+          if (id === UpgradeType.AUTO_FLIP || id === UpgradeType.PRESTIGE_AUTO) {
+              newState.autoFlipEnabled = true;
+          }
+
           return newState;
       });
       
@@ -578,8 +596,10 @@ const App: React.FC = () => {
           }
       } catch (e) { console.error(e); }
 
+      // Set resetting flag to true to prevent auto-save in useEffect from overwriting the deletion
+      isResettingRef.current = true;
       localStorage.removeItem(SAVE_KEY); 
-      setShowMomModal({ show: false, text: "" });
+      // Force reload immediately
       window.location.reload(); 
   };
 
@@ -614,12 +634,13 @@ const App: React.FC = () => {
 
   const handleDeleteClick = () => {
     if (deleteConfirm) {
+        isResettingRef.current = true;
         localStorage.removeItem(SAVE_KEY);
         localStorage.removeItem(META_SAVE_KEY);
         window.location.reload();
     } else {
         setDeleteConfirm(true);
-        deleteTimeoutRef.current = window.setTimeout(() => setDeleteConfirm(false), 3000) as unknown as number;
+        deleteTimeoutRef.current = window.setTimeout(() => setDeleteConfirm(false), 3000) as any;
     }
   };
 
@@ -638,6 +659,10 @@ const App: React.FC = () => {
            if (cheatCodeBuffer.current === "ZEX") {
                setGameState(p => ({ ...p, prestigeLevel: 199, hasCheated: true }));
                AudioService.playWin();
+               cheatCodeBuffer.current = "";
+           }
+           if (cheatCodeBuffer.current === "MOM") {
+               triggerMomEvent();
                cheatCodeBuffer.current = "";
            }
         }
@@ -673,6 +698,8 @@ const App: React.FC = () => {
       const map: Record<string, string> = { 'PURIST': 'Purist', 'PRESTIGE': 'Prestiger', 'RICH': 'High Roller', 'MOMMY': 'Mommy Lover', 'HARD_MAN': 'Hard-Man' };
       return (map[key] || key) + suffix;
   };
+
+  const animDuration = Math.max(1, UPGRADES[UpgradeType.SPEED].getEffect(gameState.upgrades[UpgradeType.SPEED] || 0) - (UPGRADES[UpgradeType.PRESTIGE_FLUX].getEffect(gameState.upgrades[UpgradeType.PRESTIGE_FLUX] || 0) * 250));
 
   return (
     <div className={`min-h-screen md:h-screen md:overflow-hidden overflow-y-auto bg-noir-950 text-noir-200 font-sans flex flex-col md:flex-row relative transition-colors duration-200 ${celebration && celebration.level >= 8 ? 'bg-noir-900' : ''}`}>
@@ -774,7 +801,8 @@ const App: React.FC = () => {
         <header className="p-6 border-b border-noir-800/50 flex justify-between items-end bg-noir-950/30 backdrop-blur-sm relative z-50">
             <div>
                 <h1 className="text-3xl font-mono font-bold tracking-tighter text-white drop-shadow-md">BEAT THE <span className="text-amber-500">ODDS</span></h1>
-                <div className="flex gap-6 mt-3 text-sm font-mono text-noir-400">
+                <a href="https://x.com/DiemetriX" target="_blank" rel="noopener noreferrer" className="text-[10px] font-mono text-noir-600 hover:text-amber-500 transition-colors block -mt-1 mb-2">Made by Thomas Davis</a>
+                <div className="flex gap-6 mt-1 text-sm font-mono text-noir-400">
                     <div className="flex flex-col"><span className="text-[10px] uppercase tracking-widest text-noir-600 mb-0.5">Current Streak</span><div className="flex items-baseline gap-1"><span className={`text-2xl font-bold leading-none ${gameState.streak > 0 ? 'text-amber-500' : 'text-noir-500'}`}>{gameState.streak}</span><span className="text-noir-600">/ {currentGoal}</span></div></div>
                     <div className="flex flex-col"><span className="text-[10px] uppercase tracking-widest text-noir-600 mb-0.5">Run Best</span><span className={`text-2xl font-bold leading-none ${gameState.maxStreak > 0 ? 'text-noir-300' : 'text-noir-500'}`}>{gameState.maxStreak}</span></div>
                     {gameState.prestigeLevel > 0 && (<div className="flex flex-col"><span className="text-[10px] uppercase tracking-widest text-purple-400 mb-0.5">Prestige</span><span className="text-2xl font-bold leading-none text-purple-300">{gameState.prestigeLevel}</span></div>)}
@@ -807,10 +835,10 @@ const App: React.FC = () => {
                 </div>
             ) : (
                 <div className="flex flex-col items-center gap-16 w-full max-w-md z-10">
-                    <div className="relative w-64 h-64 perspective-1000 flex items-center justify-center">
-                        <div className="absolute bottom-10 w-32 h-4 bg-black/40 blur-xl rounded-[100%]" style={{ animation: isFlipping ? `shadowScale ${Math.max(1, UPGRADES[UpgradeType.SPEED].getEffect(gameState.upgrades[UpgradeType.SPEED]) - (UPGRADES[UpgradeType.PRESTIGE_FLUX].getEffect(gameState.upgrades[UpgradeType.PRESTIGE_FLUX] || 0) * 250))}ms cubic-bezier(0.5, 0, 0.5, 1) forwards` : 'none' }}></div>
-                        <div className="w-48 h-48 relative preserve-3d" style={{ animation: isFlipping ? `tossHeight ${Math.max(1, UPGRADES[UpgradeType.SPEED].getEffect(gameState.upgrades[UpgradeType.SPEED]) - (UPGRADES[UpgradeType.PRESTIGE_FLUX].getEffect(gameState.upgrades[UpgradeType.PRESTIGE_FLUX] || 0) * 250))}ms cubic-bezier(0.5, 0, 0.5, 1) forwards` : 'none' }}>
-                            <div className="w-full h-full relative preserve-3d" style={{ animation: isFlipping ? `tossSpin ${Math.max(1, UPGRADES[UpgradeType.SPEED].getEffect(gameState.upgrades[UpgradeType.SPEED]) - (UPGRADES[UpgradeType.PRESTIGE_FLUX].getEffect(gameState.upgrades[UpgradeType.PRESTIGE_FLUX] || 0) * 250))}ms linear infinite` : 'none', transform: !isFlipping && coinSide ? (coinSide === 'T' ? 'rotateX(180deg)' : 'rotateX(0deg)') : undefined }}>
+                    <div key={`coin-${gameState.prestigeLevel}`} className="relative w-64 h-64 perspective-1000 flex items-center justify-center cursor-pointer" onClick={() => handleFlip(false)}>
+                        <div className="absolute bottom-10 w-32 h-4 bg-black/40 blur-xl rounded-[100%]" style={{ animation: isFlipping ? `shadowScale ${animDuration}ms cubic-bezier(0.5, 0, 0.5, 1) forwards` : 'none' }}></div>
+                        <div className="w-48 h-48 relative preserve-3d" style={{ animation: isFlipping ? `tossHeight ${animDuration}ms cubic-bezier(0.5, 0, 0.5, 1) forwards` : 'none' }}>
+                            <div className="w-full h-full relative preserve-3d" style={{ animation: isFlipping ? `tossSpin ${animDuration}ms linear infinite` : 'none', transform: !isFlipping && coinSide ? (coinSide === 'T' ? 'rotateX(180deg)' : 'rotateX(0deg)') : undefined }}>
                                 <div className="absolute inset-0 backface-hidden rounded-full bg-gradient-to-br from-amber-200 via-amber-500 to-amber-700 shadow-inner border-4 border-amber-600 flex items-center justify-center overflow-hidden" style={{ transform: 'rotateX(0deg)' }}><div className="absolute inset-0 opacity-20 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')]"></div><span className="text-8xl font-serif font-bold text-amber-950 mix-blend-overlay drop-shadow-md relative z-10">$</span></div>
                                 <div className="absolute inset-0 backface-hidden rounded-full bg-gradient-to-br from-slate-200 via-slate-400 to-slate-600 shadow-inner border-4 border-slate-500 flex items-center justify-center overflow-hidden" style={{ transform: 'rotateX(180deg)' }}><div className="absolute inset-0 opacity-20 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')]"></div><div className="relative w-full h-full z-10 opacity-70"><div className="absolute top-[35%] left-[28%] w-[14%] h-[14%] bg-slate-900 rounded-full mix-blend-overlay shadow-sm"></div><div className="absolute top-[35%] right-[28%] w-[14%] h-[14%] bg-slate-900 rounded-full mix-blend-overlay shadow-sm"></div><div className="absolute top-[52%] left-1/2 -translate-x-1/2 w-[55%] h-[35%] border-t-[10px] border-slate-900 rounded-[50%] mix-blend-overlay"></div></div></div>
                             </div>
