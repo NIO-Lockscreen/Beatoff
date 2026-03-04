@@ -16,13 +16,15 @@ interface GlobalLeaderboard {
 }
 
 const BLOB_FILENAME = 'leaderboard.json';
-
 const DEFAULT_BOARD: GlobalLeaderboard = { purist: [], prestige: [], rich: [], mommy: [] };
 
 async function readBoard(): Promise<GlobalLeaderboard> {
   try {
     const meta = await head(BLOB_FILENAME, { token: process.env.BLOB_READ_WRITE_TOKEN! });
-    const res = await fetch(meta.url);
+    // Private blob — must authenticate the fetch with the token
+    const res = await fetch(meta.url, {
+      headers: { Authorization: `Bearer ${process.env.BLOB_READ_WRITE_TOKEN!}` }
+    });
     if (!res.ok) return DEFAULT_BOARD;
     const data = await res.json() as Record<string, unknown>;
     return {
@@ -38,7 +40,7 @@ async function readBoard(): Promise<GlobalLeaderboard> {
 
 async function writeBoard(board: GlobalLeaderboard): Promise<void> {
   await put(BLOB_FILENAME, JSON.stringify(board), {
-    access: 'public',
+    access: 'private',
     contentType: 'application/json',
     token: process.env.BLOB_READ_WRITE_TOKEN!,
     addRandomSuffix: false,
@@ -86,7 +88,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const body = req.body as Record<string, unknown>;
     let board = await readBoard();
 
-    // Migration path: raw board dump
     if (!body['updates'] && (body['purist'] || body['prestige'] || body['rich'] || body['mommy'])) {
       const merged: GlobalLeaderboard = {
         purist:   Array.isArray(body['purist'])   ? body['purist']   as LeaderboardEntry[] : board.purist,
@@ -105,7 +106,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const { board: newBoard, changed } = applyUpdates(board, updates as { category: keyof GlobalLeaderboard; entry: LeaderboardEntry }[]);
     if (changed) await writeBoard(newBoard);
-
     return res.status(200).json(newBoard);
   }
 
