@@ -441,33 +441,36 @@ const Shop: React.FC<ShopProps> = ({
              </div>
         )}
 
-        {/* Flip Speed Slider */}
-        <div className="mt-3 border border-noir-800 bg-black/40 p-3 rounded">
-          <div className="flex items-center justify-between mb-2">
-            <div className="flex items-center gap-2 text-noir-400">
-              <Gauge size={12} />
-              <span className="text-[10px] font-mono uppercase tracking-widest">Flip Speed</span>
+        {/* Slow-Mo Slider — unlocked at Prestige 20. Can only slow the animation down,
+            never faster than what the player's Speed upgrades allow. */}
+        {prestigeLevel >= 20 && (
+          <div className="mt-3 border border-noir-800 bg-black/40 p-3 rounded">
+            <div className="flex items-center justify-between mb-1">
+              <div className="flex items-center gap-2 text-noir-400">
+                <Gauge size={12} />
+                <span className="text-[10px] font-mono uppercase tracking-widest">Reaction Assist</span>
+              </div>
+              <span className="text-[10px] font-mono text-amber-400 font-bold">
+                {flipSpeedMultiplier >= 1.0 ? 'Full Speed' : `${(flipSpeedMultiplier * 100).toFixed(0)}%`}
+              </span>
             </div>
-            <span className="text-[10px] font-mono text-amber-400 font-bold">
-              {flipSpeedMultiplier === 1.0 ? '1.0×' : flipSpeedMultiplier < 1 ? `${flipSpeedMultiplier.toFixed(2)}× (slower)` : `${flipSpeedMultiplier.toFixed(1)}× (faster)`}
-            </span>
+            <p className="text-[9px] text-noir-600 font-mono mb-2">Slows the flip animation. Speed upgrades still cap max speed.</p>
+            <input
+              type="range"
+              min="0.1"
+              max="1.0"
+              step="0.05"
+              value={flipSpeedMultiplier}
+              onChange={(e) => onSetFlipSpeed(parseFloat(e.target.value))}
+              className="w-full h-1.5 rounded-full appearance-none cursor-pointer bg-noir-800 accent-amber-500"
+              title="Slow the flip animation to give yourself more reaction time. Cannot exceed your current Speed upgrade level."
+            />
+            <div className="flex justify-between text-[9px] font-mono text-noir-600 mt-1">
+              <span>10% SPEED</span>
+              <span>FULL</span>
+            </div>
           </div>
-          <input
-            type="range"
-            min="0.1"
-            max="3"
-            step="0.1"
-            value={flipSpeedMultiplier}
-            onChange={(e) => onSetFlipSpeed(parseFloat(e.target.value))}
-            className="w-full h-1.5 rounded-full appearance-none cursor-pointer bg-noir-800 accent-amber-500"
-            title="Adjust flip animation speed. Slower = more time to react before auto-flip lands."
-          />
-          <div className="flex justify-between text-[9px] font-mono text-noir-600 mt-1">
-            <span>SLOW</span>
-            <span>NORMAL</span>
-            <span>FAST</span>
-          </div>
-        </div>
+        )}
       </div>
 
       <div className="flex-1 p-4 space-y-4 md:overflow-y-auto overflow-visible scrollbar-thin scrollbar-thumb-noir-700 scrollbar-track-transparent pb-16">

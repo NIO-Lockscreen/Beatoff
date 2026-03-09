@@ -7,7 +7,8 @@ import LeaderboardModal from './components/LeaderboardModal';
 import ConfettiSystem from './components/ConfettiSystem';
 import { AudioService } from './services/audioService';
 import { LeaderboardService } from './services/leaderboardService';
-import { HelpCircle, Trash2, Trophy, Volume2, VolumeX, Sparkles, Heart, List, Crown, Skull, Syringe } from 'lucide-react';
+import { HelpCircle, Trash2, Trophy, Volume2, VolumeX, Sparkles, Heart, List, Crown, Skull, Syringe, Bug } from 'lucide-react';
+import DebugMenu from './components/DebugMenu';
 
 const CELEBRATION_MESSAGES = [
   "", "", "LUCKY", "HEATING UP", "UNREAL", "DEFYING ODDS", "SYSTEM ERROR", "IMPOSSIBLE", 
@@ -195,10 +196,12 @@ const App: React.FC = () => {
   // Track the goal value at the moment of winning so the congrats popup shows the correct number
   const [wonAtGoal, setWonAtGoal] = useState<number>(0);
   const [celebration, setCelebration] = useState<{text: string, level: number, id: number} | null>(null);
-  const [edgeLanding, setEdgeLanding] = useState(false); // triggers edge-landing animation
+  const [edgeLanding, setEdgeLanding] = useState(false); // triggers edge-landing overlay
   const [muted, setMuted] = useState(true);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [showTitleSelector, setShowTitleSelector] = useState(false);
+  const [showDebugMenu, setShowDebugMenu] = useState(false);
+  const [forceHeadsDebug, setForceHeadsDebug] = useState(false);
   
   const [isFundsVisible, setIsFundsVisible] = useState(true);
   const headerFundsRef = useRef<HTMLDivElement>(null);
@@ -206,7 +209,6 @@ const App: React.FC = () => {
   const flipTimeoutRef = useRef<number | undefined>(undefined);
   const celebrationTimeoutRef = useRef<number | undefined>(undefined);
   const deleteTimeoutRef = useRef<number | undefined>(undefined);
-  const cheatCodeBuffer = useRef<string>("");
 
   const getHardModeGoal = useCallback(() => {
       return HARD_MODE_WINNING_STREAK + (gameState.stats.hardModeWins * 5);
@@ -358,8 +360,8 @@ const App: React.FC = () => {
         const roll = Math.random();
         
         // Edge landing: 1% chance in hard mode only
-        const isEdge = gameState.isHardMode && roll > 0.99;
-        const isHeads = isEdge ? false : (forceHeads || roll < chance);
+        const isEdge = gameState.isHardMode && !forceHeadsDebug && roll > 0.99;
+        const isHeads = isEdge ? false : (forceHeads || forceHeadsDebug || roll < chance);
         const result: 'H' | 'T' | 'E' = isEdge ? 'E' : (isHeads ? 'H' : 'T');
         
         setCoinSide(result);
@@ -747,6 +749,12 @@ const App: React.FC = () => {
   const toggleAutoBuy = () => setGameState(p => ({ ...p, autoBuyEnabled: !p.autoBuyEnabled }));
   const togglePartyPooper = () => setGameState(p => ({ ...p, partyPooperEnabled: !p.partyPooperEnabled }));
   const setFlipSpeedMultiplier = (val: number) => setGameState(p => ({ ...p, flipSpeedMultiplier: val }));
+
+  // Debug menu actions — all mark run as cheated
+  const debugSetPrestige = (val: number) => setGameState(p => ({ ...p, prestigeLevel: val, hasCheated: true }));
+  const debugSetMoney = (val: number) => setGameState(p => ({ ...p, money: val, hasCheated: true }));
+  const debugSetFragments = (val: number) => setGameState(p => ({ ...p, voidFragments: val, hasCheated: true }));
+  const debugToggleForceHeads = () => setForceHeadsDebug(p => !p);
   const handleSeen = (id: UpgradeType) => {
       if (!gameState.seenUpgrades.includes(id)) {
           setGameState(p => ({ ...p, seenUpgrades: [...p.seenUpgrades, id] }));
@@ -794,9 +802,19 @@ const App: React.FC = () => {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
         if ((e.target as HTMLElement).tagName === 'INPUT') return;
+        // Space to flip
         if (e.code === 'Space') { e.preventDefault(); handleFlip(false); }
-        if (e.code === 'KeyQ') { handleFlip(true); setGameState(p => ({ ...p, hasCheated: true, voidFragments: p.voidFragments + 5 })); }
-        // DEBUG: P = trigger edge animation without affecting streak/goal
+        // Backtick to toggle debug menu (marks run as cheated/disqualified)
+        if (e.key === '`' || e.key === '~') {
+            setShowDebugMenu(prev => {
+                if (!prev) {
+                    // Opening debug menu disqualifies the run
+                    setGameState(p => ({ ...p, hasCheated: true }));
+                }
+                return !prev;
+            });
+        }
+        // P = preview edge landing animation (debug only, no game effect)
         if (e.code === 'KeyP' && !isFlipping && !hasWon) {
             setCoinSide('E');
             setEdgeLanding(true);
@@ -808,18 +826,10 @@ const App: React.FC = () => {
                 setEdgeLanding(false);
             }, 4000) as unknown as number;
         }
-        if (e.key) {
-           cheatCodeBuffer.current = (cheatCodeBuffer.current + e.key).toUpperCase().slice(-3);
-           if (cheatCodeBuffer.current === "ZEX") {
-               setGameState(p => ({ ...p, prestigeLevel: 199, hasCheated: true }));
-               AudioService.playWin();
-               cheatCodeBuffer.current = "";
-           }
-        }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleFlip]);
+  }, [handleFlip, isFlipping, hasWon]);
 
   useEffect(() => {
       return () => {
@@ -854,16 +864,16 @@ const App: React.FC = () => {
     showLeaderboard ||
     showMomModal.show ||
     showHardModePrompt ||
-    showTitleSelector;
+    showTitleSelector ||
+    showDebugMenu;
 
   // Coin display transform
   const getCoinTransform = () => {
     if (isFlipping) return undefined;
     if (!coinSide) return undefined;
-    if (coinSide === 'H') return 'rotateX(0deg)';
-    if (coinSide === 'T') return 'rotateX(180deg)';
-    if (coinSide === 'E') return 'rotateX(90deg)';
-    return undefined;
+    if (coinSide === 'H') return 'rotateY(0deg)';
+    if (coinSide === 'T') return 'rotateY(180deg)';
+    return undefined; // 'E' handled by animation
   };
 
   return (
@@ -1030,27 +1040,27 @@ const App: React.FC = () => {
                     {/* Coin */}
                     <div className="relative w-64 h-64 perspective-1000 flex items-center justify-center">
                         <div className="absolute bottom-10 w-32 h-4 bg-black/40 blur-xl rounded-[100%]" style={{ animation: isFlipping ? `shadowScale ${Math.max(1, UPGRADES[UpgradeType.SPEED].getEffect(gameState.upgrades[UpgradeType.SPEED]) - (UPGRADES[UpgradeType.PRESTIGE_FLUX].getEffect(gameState.upgrades[UpgradeType.PRESTIGE_FLUX] || 0) * 250))}ms cubic-bezier(0.5, 0, 0.5, 1) forwards` : 'none' }}></div>
-                        <div className="w-48 h-48 relative preserve-3d" style={{ animation: isFlipping ? (coinSide === 'E' ? `edgeTossHeight ${Math.max(1, UPGRADES[UpgradeType.SPEED].getEffect(gameState.upgrades[UpgradeType.SPEED]) - (UPGRADES[UpgradeType.PRESTIGE_FLUX].getEffect(gameState.upgrades[UpgradeType.PRESTIGE_FLUX] || 0) * 250))}ms cubic-bezier(0.5, 0, 0.5, 1) forwards` : `tossHeight ${Math.max(1, UPGRADES[UpgradeType.SPEED].getEffect(gameState.upgrades[UpgradeType.SPEED]) - (UPGRADES[UpgradeType.PRESTIGE_FLUX].getEffect(gameState.upgrades[UpgradeType.PRESTIGE_FLUX] || 0) * 250))}ms cubic-bezier(0.5, 0, 0.5, 1) forwards`) : 'none' }}>
-                            <div className="w-full h-full relative preserve-3d" style={{ animation: isFlipping ? `tossSpin ${Math.max(1, UPGRADES[UpgradeType.SPEED].getEffect(gameState.upgrades[UpgradeType.SPEED]) - (UPGRADES[UpgradeType.PRESTIGE_FLUX].getEffect(gameState.upgrades[UpgradeType.PRESTIGE_FLUX] || 0) * 250))}ms linear infinite` : 'none', transform: !isFlipping && coinSide ? getCoinTransform() : undefined, transition: coinSide === 'E' ? 'transform 1.2s cubic-bezier(0.34, 1.56, 0.64, 1)' : undefined }}>
+                        <div className="w-48 h-48 relative preserve-3d" style={{ animation: isFlipping ? `tossHeight ${Math.max(1, UPGRADES[UpgradeType.SPEED].getEffect(gameState.upgrades[UpgradeType.SPEED]) - (UPGRADES[UpgradeType.PRESTIGE_FLUX].getEffect(gameState.upgrades[UpgradeType.PRESTIGE_FLUX] || 0) * 250))}ms cubic-bezier(0.5, 0, 0.5, 1) forwards` : 'none' }}>
+                            <div className="w-full h-full relative preserve-3d" style={{
+                                // During flip: normal tossSpin
+                                // After landing edge: rotateY spin (coin standing on edge, spinning like a wheel)
+                                // After landing H/T: static transform
+                                animation: isFlipping
+                                    ? `tossSpin ${Math.max(1, UPGRADES[UpgradeType.SPEED].getEffect(gameState.upgrades[UpgradeType.SPEED]) - (UPGRADES[UpgradeType.PRESTIGE_FLUX].getEffect(gameState.upgrades[UpgradeType.PRESTIGE_FLUX] || 0) * 250))}ms linear infinite`
+                                    : (coinSide === 'E' ? 'edgeLandSpin 1.8s linear infinite' : 'none'),
+                                transform: (!isFlipping && coinSide && coinSide !== 'E') ? getCoinTransform() : undefined,
+                            }}>
                                 {/* Heads face */}
-                                <div className="absolute inset-0 backface-hidden rounded-full bg-gradient-to-br from-amber-200 via-amber-500 to-amber-700 shadow-inner border-4 border-amber-600 flex items-center justify-center overflow-hidden" style={{ transform: 'rotateX(0deg)' }}><div className="absolute inset-0 opacity-20 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')]"></div><span className="text-8xl font-serif font-bold text-amber-950 mix-blend-overlay drop-shadow-md relative z-10">$</span></div>
+                                <div className="absolute inset-0 backface-hidden rounded-full bg-gradient-to-br from-amber-200 via-amber-500 to-amber-700 shadow-inner border-4 border-amber-600 flex items-center justify-center overflow-hidden" style={{ transform: 'rotateY(0deg)' }}><div className="absolute inset-0 opacity-20 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')]"></div><span className="text-8xl font-serif font-bold text-amber-950 mix-blend-overlay drop-shadow-md relative z-10">$</span></div>
                                 {/* Tails face */}
-                                <div className="absolute inset-0 backface-hidden rounded-full bg-gradient-to-br from-slate-200 via-slate-400 to-slate-600 shadow-inner border-4 border-slate-500 flex items-center justify-center overflow-hidden" style={{ transform: 'rotateX(180deg)' }}><div className="absolute inset-0 opacity-20 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')]"></div><div className="relative w-full h-full z-10 opacity-70"><div className="absolute top-[35%] left-[28%] w-[14%] h-[14%] bg-slate-900 rounded-full mix-blend-overlay shadow-sm"></div><div className="absolute top-[35%] right-[28%] w-[14%] h-[14%] bg-slate-900 rounded-full mix-blend-overlay shadow-sm"></div><div className="absolute top-[52%] left-1/2 -translate-x-1/2 w-[55%] h-[35%] border-t-[10px] border-slate-900 rounded-[50%] mix-blend-overlay"></div></div></div>
-                                {/* Edge face — shown when rotateX(90deg) */}
-                                <div className="absolute backface-hidden flex items-center justify-center overflow-hidden"
-                                     style={{ 
-                                       transform: 'rotateX(90deg)', 
-                                       width: '100%', 
-                                       height: '16px', 
-                                       top: '50%', 
-                                       left: 0, 
-                                       marginTop: '-8px',
-                                       background: 'linear-gradient(90deg, #b45309, #f59e0b, #fcd34d, #f59e0b, #b45309)',
-                                       borderRadius: '4px',
-                                       boxShadow: '0 0 20px rgba(251,191,36,0.8), 0 0 40px rgba(251,191,36,0.4)',
-                                     }}>
-                                    <span className="text-[8px] font-mono font-bold text-amber-950 tracking-[0.3em] uppercase select-none">⬡ EDGE ⬡</span>
-                                </div>
+                                <div className="absolute inset-0 backface-hidden rounded-full bg-gradient-to-br from-slate-200 via-slate-400 to-slate-600 shadow-inner border-4 border-slate-500 flex items-center justify-center overflow-hidden" style={{ transform: 'rotateY(180deg)' }}><div className="absolute inset-0 opacity-20 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')]"></div><div className="relative w-full h-full z-10 opacity-70"><div className="absolute top-[35%] left-[28%] w-[14%] h-[14%] bg-slate-900 rounded-full mix-blend-overlay shadow-sm"></div><div className="absolute top-[35%] right-[28%] w-[14%] h-[14%] bg-slate-900 rounded-full mix-blend-overlay shadow-sm"></div><div className="absolute top-[52%] left-1/2 -translate-x-1/2 w-[55%] h-[35%] border-t-[10px] border-slate-900 rounded-[50%] mix-blend-overlay"></div></div></div>
+                                {/* Edge rim band — only rendered after an edge landing, not during spin */}
+                                {coinSide === 'E' && !isFlipping && (
+                                    <div className="absolute inset-0 rounded-full pointer-events-none" style={{
+                                        background: 'transparent',
+                                        boxShadow: '0 0 0 6px rgba(251,191,36,0.25), inset 0 0 0 6px rgba(251,191,36,0.15)',
+                                    }} />
+                                )}
                             </div>
                         </div>
                     </div>
@@ -1088,6 +1098,7 @@ const App: React.FC = () => {
                  <button onClick={toggleMute} className="p-2 text-noir-500 hover:text-white transition-colors hover:bg-noir-900 rounded-full cursor-pointer" title={muted ? "Unmute" : "Mute"}>{muted ? <VolumeX size={20} /> : <Volume2 size={20} />}</button>
                  <button onClick={() => setShowModal(true)} className="p-2 text-noir-500 hover:text-white transition-colors hover:bg-noir-900 rounded-full cursor-pointer" title="Math Analysis"><HelpCircle size={20} /></button>
                  <button onClick={handleDeleteClick} className={`p-2 transition-colors rounded-full font-mono text-xs flex items-center justify-center cursor-pointer w-9 h-9 ${deleteConfirm ? 'bg-red-900 text-white hover:bg-red-800 ring-1 ring-red-500' : 'text-noir-500 hover:text-red-500 hover:bg-noir-900'}`} title="Delete Save & Reset">{deleteConfirm ? '!' : <Trash2 size={20} />}</button>
+                 <button onClick={() => { setShowDebugMenu(true); setGameState(p => ({ ...p, hasCheated: true })); }} className="p-2 text-noir-700 hover:text-yellow-500 transition-colors hover:bg-noir-900 rounded-full cursor-pointer" title="Debug Menu (` key)">{<Bug size={18} />}</button>
             </div>
         </footer>
 
@@ -1125,8 +1136,41 @@ const App: React.FC = () => {
             currentStats={{ purist: gameState.stats.puristWins, prestige: gameState.stats.maxPrestigeLevel, rich: gameState.stats.highestCash, mommy: gameState.stats.momPurchases, hardMode: gameState.stats.hardModeWins }}
             onSubmitRun={handleManualSubmit}
         />
+        <DebugMenu
+            isOpen={showDebugMenu}
+            onClose={() => setShowDebugMenu(false)}
+            prestigeLevel={gameState.prestigeLevel}
+            money={gameState.money}
+            voidFragments={gameState.voidFragments}
+            forceHeads={forceHeadsDebug}
+            onToggleForceHeads={debugToggleForceHeads}
+            onSetPrestige={debugSetPrestige}
+            onSetMoney={debugSetMoney}
+            onSetFragments={debugSetFragments}
+            onOpenLeaderboard={() => setShowLeaderboard(true)}
+        />
       </div>
-      <style>{`.rotate-x-180 { transform: rotateX(180deg); } .mask-linear-fade { mask-image: linear-gradient(to right, transparent, black 10%, black 90%, transparent); -webkit-mask-image: linear-gradient(to right, transparent, black 10%, black 90%, transparent); } @keyframes popInUp { 0% { opacity: 0; transform: translateY(20px) scale(0.9); } 100% { opacity: 1; transform: translateY(0) scale(1); } } .animate-pop-in-up { animation: popInUp 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; } @keyframes popUp { 0% { opacity: 0; transform: scale(0.5); } 50% { opacity: 1; transform: scale(1.1); } 100% { opacity: 1; transform: scale(1); } } .animate-pop-up { animation: popUp 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; } @keyframes scaleSlam { 0% { opacity: 0; transform: scale(5); } 60% { opacity: 1; transform: scale(0.9); } 100% { opacity: 1; transform: scale(1); } } .animate-scale-slam { animation: scaleSlam 0.5s cubic-bezier(0.6, -0.28, 0.735, 0.045) forwards; } @keyframes flash { 0%, 100% { opacity: 0; } 10%, 90% { opacity: 1; } } .animate-flash { animation: flash 0.3s ease-out forwards; } @keyframes shake { 0%, 100% { transform: translateX(0); } 10%, 30%, 50%, 70%, 90% { transform: translateX(-5px) rotate(-1deg); } 20%, 40%, 60%, 80% { transform: translateX(5px) rotate(1deg); } } .animate-shake { animation: shake 0.5s ease-in-out; } @keyframes edgeGlow { 0%, 100% { opacity: 0; } 20%, 80% { opacity: 1; } } .animate-edge-glow { animation: edgeGlow 3s ease-in-out; } @keyframes edgeBorderPulse { 0% { opacity: 0; transform: scale(0.95); } 30% { opacity: 1; transform: scale(1.02); } 60% { opacity: 0.6; transform: scale(1); } 100% { opacity: 0; } } .animate-edge-border-pulse { animation: edgeBorderPulse 3s ease-out forwards; } @keyframes edgeText { 0% { opacity: 0; transform: scale(0.3) rotateY(90deg); } 40% { opacity: 1; transform: scale(1.1) rotateY(0deg); } 70% { transform: scale(0.95); } 100% { opacity: 1; transform: scale(1); } } .animate-edge-text { animation: edgeText 0.8s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }`}</style>
+      <style>{`
+        .mask-linear-fade { mask-image: linear-gradient(to right, transparent, black 10%, black 90%, transparent); -webkit-mask-image: linear-gradient(to right, transparent, black 10%, black 90%, transparent); }
+        @keyframes popInUp { 0% { opacity: 0; transform: translateY(20px) scale(0.9); } 100% { opacity: 1; transform: translateY(0) scale(1); } }
+        .animate-pop-in-up { animation: popInUp 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
+        @keyframes popUp { 0% { opacity: 0; transform: scale(0.5); } 50% { opacity: 1; transform: scale(1.1); } 100% { opacity: 1; transform: scale(1); } }
+        .animate-pop-up { animation: popUp 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
+        @keyframes scaleSlam { 0% { opacity: 0; transform: scale(5); } 60% { opacity: 1; transform: scale(0.9); } 100% { opacity: 1; transform: scale(1); } }
+        .animate-scale-slam { animation: scaleSlam 0.5s cubic-bezier(0.6, -0.28, 0.735, 0.045) forwards; }
+        @keyframes flash { 0%, 100% { opacity: 0; } 10%, 90% { opacity: 1; } }
+        .animate-flash { animation: flash 0.3s ease-out forwards; }
+        @keyframes shake { 0%, 100% { transform: translateX(0); } 10%, 30%, 50%, 70%, 90% { transform: translateX(-5px) rotate(-1deg); } 20%, 40%, 60%, 80% { transform: translateX(5px) rotate(1deg); } }
+        .animate-shake { animation: shake 0.5s ease-in-out; }
+        @keyframes edgeGlow { 0%, 100% { opacity: 0; } 20%, 80% { opacity: 1; } }
+        .animate-edge-glow { animation: edgeGlow 3s ease-in-out; }
+        @keyframes edgeBorderPulse { 0% { opacity: 0; transform: scale(0.95); } 30% { opacity: 1; transform: scale(1.02); } 60% { opacity: 0.6; transform: scale(1); } 100% { opacity: 0; } }
+        .animate-edge-border-pulse { animation: edgeBorderPulse 3s ease-out forwards; }
+        @keyframes edgeText { 0% { opacity: 0; transform: scale(0.3) rotateY(90deg); } 40% { opacity: 1; transform: scale(1.1) rotateY(0deg); } 70% { transform: scale(0.95); } 100% { opacity: 1; transform: scale(1); } }
+        .animate-edge-text { animation: edgeText 0.8s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
+        /* Edge landing: coin stands on its rim and spins like a wheel (rotateY = horizontal axis spin) */
+        @keyframes edgeLandSpin { from { transform: rotateY(0deg); } to { transform: rotateY(360deg); } }
+      `}</style>
     </div>
   );
 };
