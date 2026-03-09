@@ -197,6 +197,7 @@ const App: React.FC = () => {
   const [wonAtGoal, setWonAtGoal] = useState<number>(0);
   const [celebration, setCelebration] = useState<{text: string, level: number, id: number} | null>(null);
   const [edgeLanding, setEdgeLanding] = useState(false); // triggers edge-landing overlay
+  const [isEdgeSpinning, setIsEdgeSpinning] = useState(false); // pauses auto-flip for 3s
   const [muted, setMuted] = useState(true);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [showTitleSelector, setShowTitleSelector] = useState(false);
@@ -433,10 +434,13 @@ const App: React.FC = () => {
 
                 setCelebration({ text: "⬡ EDGE LANDING ⬡", level: 15, id: Date.now() });
                 if (celebrationTimeoutRef.current) window.clearTimeout(celebrationTimeoutRef.current);
+                // Pause auto-flip for 3s so the player can see the spinning coin
+                setIsEdgeSpinning(true);
                 celebrationTimeoutRef.current = window.setTimeout(() => {
                     setCelebration(null);
                     setEdgeLanding(false);
-                }, 4000) as unknown as number;
+                    setIsEdgeSpinning(false);
+                }, 3000) as unknown as number;
 
             } else if (isHeads) {
                 // ── HEADS ─────────────────────────────────────────────────────
@@ -603,11 +607,11 @@ const App: React.FC = () => {
     const hasAuto = gameState.upgrades[UpgradeType.AUTO_FLIP] > 0 || gameState.upgrades[UpgradeType.PRESTIGE_AUTO] > 0;
     const goal = gameState.isHardMode ? HARD_MODE_WINNING_STREAK + (gameState.stats.hardModeWins * 5) : WINNING_STREAK;
     
-    if (gameState.autoFlipEnabled && hasAuto && !isFlipping && !hasWon && gameState.streak < goal && !showMomModal.show) {
+    if (gameState.autoFlipEnabled && hasAuto && !isFlipping && !hasWon && !isEdgeSpinning && gameState.streak < goal && !showMomModal.show) {
         const timer = window.setTimeout(() => handleFlip(false, true), 100) as unknown as number;
         return () => window.clearTimeout(timer);
     }
-  }, [gameState.autoFlipEnabled, isFlipping, hasWon, gameState.streak, gameState.isHardMode, gameState.upgrades, handleFlip, showMomModal, gameState.stats.hardModeWins]);
+  }, [gameState.autoFlipEnabled, isFlipping, hasWon, isEdgeSpinning, gameState.streak, gameState.isHardMode, gameState.upgrades, handleFlip, showMomModal, gameState.stats.hardModeWins]);
 
   // Auto Buy
   useEffect(() => {
@@ -818,13 +822,15 @@ const App: React.FC = () => {
         if (e.code === 'KeyP' && !isFlipping && !hasWon) {
             setCoinSide('E');
             setEdgeLanding(true);
+            setIsEdgeSpinning(true);
             AudioService.playWin();
             setCelebration({ text: '⬡ EDGE LANDING ⬡', level: 15, id: Date.now() });
             if (celebrationTimeoutRef.current) window.clearTimeout(celebrationTimeoutRef.current);
             celebrationTimeoutRef.current = window.setTimeout(() => {
                 setCelebration(null);
                 setEdgeLanding(false);
-            }, 4000) as unknown as number;
+                setIsEdgeSpinning(false);
+            }, 3000) as unknown as number;
         }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -871,9 +877,9 @@ const App: React.FC = () => {
   const getCoinTransform = () => {
     if (isFlipping) return undefined;
     if (!coinSide) return undefined;
-    if (coinSide === 'H') return 'rotateY(0deg)';
-    if (coinSide === 'T') return 'rotateY(180deg)';
-    return undefined; // 'E' handled by animation
+    if (coinSide === 'H') return 'rotateX(0deg)';
+    if (coinSide === 'T') return 'rotateX(180deg)';
+    return undefined; // 'E' handled by its own animation
   };
 
   return (
@@ -1051,9 +1057,9 @@ const App: React.FC = () => {
                                 transform: (!isFlipping && coinSide && coinSide !== 'E') ? getCoinTransform() : undefined,
                             }}>
                                 {/* Heads face */}
-                                <div className="absolute inset-0 backface-hidden rounded-full bg-gradient-to-br from-amber-200 via-amber-500 to-amber-700 shadow-inner border-4 border-amber-600 flex items-center justify-center overflow-hidden" style={{ transform: 'rotateY(0deg)' }}><div className="absolute inset-0 opacity-20 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')]"></div><span className="text-8xl font-serif font-bold text-amber-950 mix-blend-overlay drop-shadow-md relative z-10">$</span></div>
+                                <div className="absolute inset-0 backface-hidden rounded-full bg-gradient-to-br from-amber-200 via-amber-500 to-amber-700 shadow-inner border-4 border-amber-600 flex items-center justify-center overflow-hidden" style={{ transform: 'rotateX(0deg)' }}><div className="absolute inset-0 opacity-20 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')]"></div><span className="text-8xl font-serif font-bold text-amber-950 mix-blend-overlay drop-shadow-md relative z-10">$</span></div>
                                 {/* Tails face */}
-                                <div className="absolute inset-0 backface-hidden rounded-full bg-gradient-to-br from-slate-200 via-slate-400 to-slate-600 shadow-inner border-4 border-slate-500 flex items-center justify-center overflow-hidden" style={{ transform: 'rotateY(180deg)' }}><div className="absolute inset-0 opacity-20 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')]"></div><div className="relative w-full h-full z-10 opacity-70"><div className="absolute top-[35%] left-[28%] w-[14%] h-[14%] bg-slate-900 rounded-full mix-blend-overlay shadow-sm"></div><div className="absolute top-[35%] right-[28%] w-[14%] h-[14%] bg-slate-900 rounded-full mix-blend-overlay shadow-sm"></div><div className="absolute top-[52%] left-1/2 -translate-x-1/2 w-[55%] h-[35%] border-t-[10px] border-slate-900 rounded-[50%] mix-blend-overlay"></div></div></div>
+                                <div className="absolute inset-0 backface-hidden rounded-full bg-gradient-to-br from-slate-200 via-slate-400 to-slate-600 shadow-inner border-4 border-slate-500 flex items-center justify-center overflow-hidden" style={{ transform: 'rotateX(180deg)' }}><div className="absolute inset-0 opacity-20 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')]"></div><div className="relative w-full h-full z-10 opacity-70"><div className="absolute top-[35%] left-[28%] w-[14%] h-[14%] bg-slate-900 rounded-full mix-blend-overlay shadow-sm"></div><div className="absolute top-[35%] right-[28%] w-[14%] h-[14%] bg-slate-900 rounded-full mix-blend-overlay shadow-sm"></div><div className="absolute top-[52%] left-1/2 -translate-x-1/2 w-[55%] h-[35%] border-t-[10px] border-slate-900 rounded-[50%] mix-blend-overlay"></div></div></div>
                                 {/* Edge rim band — only rendered after an edge landing, not during spin */}
                                 {coinSide === 'E' && !isFlipping && (
                                     <div className="absolute inset-0 rounded-full pointer-events-none" style={{
