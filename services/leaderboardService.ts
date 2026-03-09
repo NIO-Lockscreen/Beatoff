@@ -20,7 +20,8 @@ const DEFAULT_BOARD: GlobalLeaderboard = {
   purist: [],
   prestige: [],
   rich: [],
-  mommy: []
+  mommy: [],
+  hardMode: []
 };
 
 // --- Local Storage Helpers (Moved up to avoid TDZ) ---
@@ -93,7 +94,8 @@ export const LeaderboardService = {
           purist: Array.isArray(data.purist) ? data.purist : [],
           prestige: Array.isArray(data.prestige) ? data.prestige : [],
           rich: Array.isArray(data.rich) ? data.rich : [],
-          mommy: Array.isArray(data.mommy) ? data.mommy : []
+          mommy: Array.isArray(data.mommy) ? data.mommy : [],
+          hardMode: Array.isArray(data.hardMode) ? data.hardMode : []
       };
   },
 
@@ -190,7 +192,7 @@ export const LeaderboardService = {
               const currentBoard = await LeaderboardService._fetchStrict();
               let hasChanges = false;
               
-              (['purist', 'prestige', 'rich', 'mommy'] as const).forEach(cat => {
+              (['purist', 'prestige', 'rich', 'mommy', 'hardMode'] as const).forEach(cat => {
                   const initialLen = currentBoard[cat].length;
                   // Case insensitive wipe
                   const filtered = currentBoard[cat].filter(e => e.name.toLowerCase() !== 'cheater');

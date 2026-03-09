@@ -9,24 +9,28 @@ export enum UpgradeType {
   EDGING = 'EDGING',
   
   // Prestige (Void)
-  PRESTIGE_KARMA = 'PRESTIGE_KARMA', // Starting money
-  PRESTIGE_FATE = 'PRESTIGE_FATE',   // Base chance increase
-  PRESTIGE_FLUX = 'PRESTIGE_FLUX',   // Base speed increase
+  PRESTIGE_KARMA = 'PRESTIGE_KARMA',
+  PRESTIGE_FATE = 'PRESTIGE_FATE',
+  PRESTIGE_FLUX = 'PRESTIGE_FLUX',
   
   // New Prestige Unlocks
-  PRESTIGE_PASSIVE = 'PRESTIGE_PASSIVE', // Permanent Passive Income
-  PRESTIGE_AUTO = 'PRESTIGE_AUTO',       // Permanent Auto Flip
-  PRESTIGE_AUTO_BUY = 'PRESTIGE_AUTO_BUY', // NEW: Auto Buyer
-  PRESTIGE_EDGING = 'PRESTIGE_EDGING',   // Permanent Edging
-  PRESTIGE_GOLD_DIGGER = 'PRESTIGE_GOLD_DIGGER', // New Multiplier
-  PRESTIGE_LIMITLESS = 'PRESTIGE_LIMITLESS', // Break all limits
-  PRESTIGE_MOM = 'PRESTIGE_MOM', // The forbidden button
-  PRESTIGE_CARE_PACKAGE = 'PRESTIGE_CARE_PACKAGE', // Dollar store upgrade
-  PRESTIGE_VETERAN = 'PRESTIGE_VETERAN', // Unlocked after Hard Mode win
-  PRESTIGE_PARTY_POOPER = 'PRESTIGE_PARTY_POOPER', // Disable confetti effects
+  PRESTIGE_PASSIVE = 'PRESTIGE_PASSIVE',
+  PRESTIGE_AUTO = 'PRESTIGE_AUTO',
+  PRESTIGE_AUTO_BUY = 'PRESTIGE_AUTO_BUY',
+  PRESTIGE_EDGING = 'PRESTIGE_EDGING',
+  PRESTIGE_GOLD_DIGGER = 'PRESTIGE_GOLD_DIGGER',
+  PRESTIGE_LIMITLESS = 'PRESTIGE_LIMITLESS',
+  PRESTIGE_MOM = 'PRESTIGE_MOM',
+  PRESTIGE_CARE_PACKAGE = 'PRESTIGE_CARE_PACKAGE',
+  PRESTIGE_VETERAN = 'PRESTIGE_VETERAN',
+  PRESTIGE_PARTY_POOPER = 'PRESTIGE_PARTY_POOPER',
 
   // Hard Mode
-  HARD_MODE_BUFF = 'HARD_MODE_BUFF', // +20% for one flip
+  HARD_MODE_BUFF = 'HARD_MODE_BUFF',
+  HARD_MODE_MULTI_FLIP = 'HARD_MODE_MULTI_FLIP',
+  HARD_MODE_FORGIVENESS = 'HARD_MODE_FORGIVENESS',
+  HARD_MODE_MORE_FRAGMENTS = 'HARD_MODE_MORE_FRAGMENTS',
+  HARD_MODE_NICKEL = 'HARD_MODE_NICKEL',
 }
 
 export interface UpgradeConfig {
@@ -36,27 +40,25 @@ export interface UpgradeConfig {
   baseCost: number;
   costTiers: number[];
   maxLevel: number;
-  limitlessMaxLevel?: number; // New max level when Limitless is active
-  isPrestige?: boolean; // If true, costs Void Fragments
-  // Function to calculate effect based on level
+  limitlessMaxLevel?: number;
+  isPrestige?: boolean;
   getEffect: (level: number) => number;
-  // Function to format the effect for display
   formatEffect: (value: number) => string;
 }
 
 export interface PlayerStats {
-  puristWins: number;      // Wins without auto flip
-  momPurchases: number;    // Times "Your Mom" was bought
-  highestCash: number;     // Highest cash ever held (at time of win)
-  totalPrestiges: number;  // Total number of prestiges performed
-  maxPrestigeLevel: number; // Highest prestige level reached (for leaderboard)
-  hardModeWins: number;    // Number of times Hard Mode was beaten
+  puristWins: number;
+  momPurchases: number;
+  highestCash: number;
+  totalPrestiges: number;
+  maxPrestigeLevel: number;
+  hardModeWins: number;
 }
 
 export interface Title {
   id: string;
   name: string;
-  level: number; // x1, x2, etc.
+  level: number;
   description: string;
   secret?: boolean;
 }
@@ -67,35 +69,31 @@ export interface GameState {
   maxStreak: number;
   totalFlips: number;
   upgrades: Record<UpgradeType, number>;
-  history: ('H' | 'T')[];
+  history: ('H' | 'T' | 'E')[];
   
-  // Prestige Data
-  prestigeLevel: number; // Multiplier for global income
-  voidFragments: number; // Currency for prestige shop
-  autoFlipEnabled: boolean; // Toggle for auto flippers
-  autoBuyEnabled: boolean; // Toggle for auto buyer
-  partyPooperEnabled: boolean; // Toggle for Party Pooper (disables confetti)
+  prestigeLevel: number;
+  voidFragments: number;
+  autoFlipEnabled: boolean;
+  autoBuyEnabled: boolean;
+  partyPooperEnabled: boolean;
   
-  // Hard Mode
-  isHardMode: boolean; // 70% Cap, 15 Streak goal
+  isHardMode: boolean;
   
-  // UX
-  seenUpgrades: UpgradeType[]; // List of upgrades user has scrolled to/seen
+  seenUpgrades: UpgradeType[];
+  flipSpeedMultiplier: number; // 0.25–3.0, default 1.0, persists across runs
   
-  // Leaderboard & Titles
   playerName: string | null;
   stats: PlayerStats;
-  unlockedTitles: Record<string, number>; // Key is Title ID, value is Level
+  unlockedTitles: Record<string, number>;
   activeTitle: string | null;
-  isPuristRun: boolean; // Tracks if current run has used auto flip
-  hasCheated: boolean; // Tracks if debug keys were used
+  isPuristRun: boolean;
+  hasCheated: boolean;
 }
 
 export const WINNING_STREAK = 10;
 export const HARD_MODE_WINNING_STREAK = 15;
 export const FRAGMENTS_PER_WIN = 5;
 
-// Leaderboard Types
 export interface LeaderboardEntry {
   name: string;
   score: number;
@@ -108,4 +106,5 @@ export interface GlobalLeaderboard {
   prestige: LeaderboardEntry[];
   rich: LeaderboardEntry[];
   mommy: LeaderboardEntry[];
+  hardMode: LeaderboardEntry[];
 }

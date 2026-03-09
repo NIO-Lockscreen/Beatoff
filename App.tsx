@@ -46,6 +46,10 @@ const INITIAL_STATE: GameState = {
     [UpgradeType.PRESTIGE_MOM]: 0, [UpgradeType.PRESTIGE_CARE_PACKAGE]: 0, [UpgradeType.PRESTIGE_VETERAN]: 0,
     [UpgradeType.PRESTIGE_PARTY_POOPER]: 0,
     [UpgradeType.HARD_MODE_BUFF]: 0,
+    [UpgradeType.HARD_MODE_MULTI_FLIP]: 0,
+    [UpgradeType.HARD_MODE_FORGIVENESS]: 0,
+    [UpgradeType.HARD_MODE_MORE_FRAGMENTS]: 0,
+    [UpgradeType.HARD_MODE_NICKEL]: 0,
   },
   history: [],
   prestigeLevel: 0,
@@ -55,6 +59,7 @@ const INITIAL_STATE: GameState = {
   partyPooperEnabled: false,
   isHardMode: false,
   seenUpgrades: [UpgradeType.CHANCE, UpgradeType.SPEED, UpgradeType.COMBO, UpgradeType.VALUE], 
+  flipSpeedMultiplier: 1.0,
   playerName: null,
   stats: INITIAL_STATS,
   unlockedTitles: {},
@@ -150,7 +155,7 @@ const App: React.FC = () => {
         if (typeof loaded.autoFlipEnabled === 'undefined') loaded.autoFlipEnabled = true;
         if (typeof loaded.autoBuyEnabled === 'undefined') loaded.autoBuyEnabled = false;
         if (typeof loaded.partyPooperEnabled === 'undefined') loaded.partyPooperEnabled = false;
-        // Retroactive unlock: players at prestige 5+ automatically receive the Party Pooper upgrade
+        if (typeof loaded.flipSpeedMultiplier === 'undefined') loaded.flipSpeedMultiplier = 1.0;
         if (typeof loaded.upgrades[UpgradeType.PRESTIGE_PARTY_POOPER] === 'undefined') {
             loaded.upgrades[UpgradeType.PRESTIGE_PARTY_POOPER] = 0;
         }
@@ -181,13 +186,16 @@ const App: React.FC = () => {
   });
 
   const [isFlipping, setIsFlipping] = useState(false);
-  const [coinSide, setCoinSide] = useState<'H' | 'T' | null>(null);
+  const [coinSide, setCoinSide] = useState<'H' | 'T' | 'E' | null>(null);
   const [showModal, setShowModal] = useState(false);
   const [showLeaderboard, setShowLeaderboard] = useState(false);
   const [showMomModal, setShowMomModal] = useState<{show: boolean, text: string}>({show: false, text: ""});
   const [showHardModePrompt, setShowHardModePrompt] = useState(false);
   const [hasWon, setHasWon] = useState(false);
+  // Track the goal value at the moment of winning so the congrats popup shows the correct number
+  const [wonAtGoal, setWonAtGoal] = useState<number>(0);
   const [celebration, setCelebration] = useState<{text: string, level: number, id: number} | null>(null);
+  const [edgeLanding, setEdgeLanding] = useState(false); // triggers edge-landing animation
   const [muted, setMuted] = useState(true);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [showTitleSelector, setShowTitleSelector] = useState(false);
@@ -206,9 +214,6 @@ const App: React.FC = () => {
 
   const currentGoal = gameState.isHardMode ? getHardModeGoal() : WINNING_STREAK;
 
-  // ── Derived: has the player ever won at least one round? ──────────────────
-  // totalPrestiges increments on every ascend (which requires a win), and
-  // hardModeWins also tracks wins, so either being > 0 means they've won.
   const hasEverWon =
     hasWon ||
     gameState.stats.totalPrestiges > 0 ||
@@ -264,6 +269,10 @@ const App: React.FC = () => {
           } else {
               prestigeUpgrades[k] = 0;
           }
+          // Reset one-time hard mode consumables on ascend
+          if (k === UpgradeType.HARD_MODE_BUFF || k === UpgradeType.HARD_MODE_MULTI_FLIP || k === UpgradeType.HARD_MODE_FORGIVENESS) {
+              prestigeUpgrades[k] = 0;
+          }
       });
 
       const voidReward = FRAGMENTS_PER_WIN;
@@ -298,6 +307,8 @@ const App: React.FC = () => {
           hasCheated: gameState.hasCheated,
           autoFlipEnabled: gameState.autoFlipEnabled,
           autoBuyEnabled: gameState.autoBuyEnabled,
+          partyPooperEnabled: gameState.partyPooperEnabled, // ── FIX: persist across runs
+          flipSpeedMultiplier: gameState.flipSpeedMultiplier, // ── persist across runs
           isHardMode: forceHardMode || gameState.isHardMode
       };
 
@@ -313,6 +324,7 @@ const App: React.FC = () => {
 
       setGameState(nextState);
       setHasWon(false);
+      setWonAtGoal(0);
       setCoinSide(null);
       setCelebration(null);
   };
@@ -331,31 +343,45 @@ const App: React.FC = () => {
     const speedLevel = gameState.upgrades[UpgradeType.SPEED] || 0;
     const fluxLevel = gameState.upgrades[UpgradeType.PRESTIGE_FLUX] || 0;
     const hasLimitless = (gameState.upgrades[UpgradeType.PRESTIGE_LIMITLESS] || 0) > 0;
+    const speedMult = gameState.flipSpeedMultiplier || 1.0;
     
     let duration = UPGRADES[UpgradeType.SPEED].getEffect(speedLevel);
     duration = Math.max(hasLimitless ? 1 : 50, duration - (fluxLevel * 250));
+    // Apply the user's speed multiplier (higher value = slower = more reaction time)
+    duration = Math.round(duration / speedMult);
+    duration = Math.max(hasLimitless ? 1 : 50, duration);
 
     if (duration > 50) AudioService.playFlip();
 
     flipTimeoutRef.current = window.setTimeout(() => {
         const chance = calculateChance();
         const roll = Math.random();
-        const isHeads = forceHeads || roll < chance;
-        const result = isHeads ? 'H' : 'T';
+        
+        // Edge landing: 1% chance in hard mode only
+        const isEdge = gameState.isHardMode && roll > 0.99;
+        const isHeads = isEdge ? false : (forceHeads || roll < chance);
+        const result: 'H' | 'T' | 'E' = isEdge ? 'E' : (isHeads ? 'H' : 'T');
         
         setCoinSide(result);
+        if (isEdge) setEdgeLanding(true);
 
         setGameState(prev => {
             let newState = { ...prev, totalFlips: prev.totalFlips + 1 };
             
+            // Reset one-time-use consumable buffs after any flip
             if (newState.upgrades[UpgradeType.HARD_MODE_BUFF] > 0) {
-                newState.upgrades[UpgradeType.HARD_MODE_BUFF] = 0;
+                newState.upgrades = { ...newState.upgrades, [UpgradeType.HARD_MODE_BUFF]: 0 };
             }
             if (isAuto) newState.isPuristRun = false;
 
-            if (isHeads) {
-                const newStreak = prev.streak + 1;
-                if (duration > 50 || newStreak % 10 === 0) AudioService.playHeads(newStreak);
+            if (isEdge) {
+                // ── EDGE LANDING ─────────────────────────────────────────────
+                // Worth 10 heads! Add to streak directly.
+                const nickelActive = (prev.upgrades[UpgradeType.HARD_MODE_NICKEL] || 0) > 0;
+                const edgeWorth = nickelActive ? 20 : 10;
+                const newStreak = prev.streak + edgeWorth;
+                
+                AudioService.playWin();
                 
                 const comboLevel = prev.upgrades[UpgradeType.COMBO] || 0;
                 const valueLevel = prev.upgrades[UpgradeType.VALUE] || 0;
@@ -364,28 +390,104 @@ const App: React.FC = () => {
                 const goldDiggerLevel = prev.upgrades[UpgradeType.PRESTIGE_GOLD_DIGGER] || 0;
                 const veteranLevel = prev.upgrades[UpgradeType.PRESTIGE_VETERAN] || 0;
 
-                let baseVal = UPGRADES[UpgradeType.VALUE].getEffect(valueLevel);
-                let comboMult = UPGRADES[UpgradeType.COMBO].getEffect(comboLevel);
-                if (newStreak > 1) baseVal *= (1 + (newStreak * (comboMult - 1))); 
-
-                let multiplier = 1;
-                if (edgingLevel > 0) multiplier *= 10;
-                if (pEdgingLevel > 0) multiplier *= 10;
-                if (goldDiggerLevel > 0) multiplier *= UPGRADES[UpgradeType.PRESTIGE_GOLD_DIGGER].getEffect(goldDiggerLevel);
-                if (veteranLevel > 0) multiplier *= Math.max(1, 1 + (prev.prestigeLevel * 0.10));
-                if (prev.isHardMode) multiplier *= 10;
+                // Earn money for each of the edgeWorth heads
+                let totalGain = 0;
+                for (let i = 0; i < edgeWorth; i++) {
+                    const streakAtStep = prev.streak + i + 1;
+                    let baseVal = UPGRADES[UpgradeType.VALUE].getEffect(valueLevel);
+                    let comboMult = UPGRADES[UpgradeType.COMBO].getEffect(comboLevel);
+                    if (streakAtStep > 1) baseVal *= (1 + (streakAtStep * (comboMult - 1)));
+                    let mult = 1;
+                    if (edgingLevel > 0) mult *= 10;
+                    if (pEdgingLevel > 0) mult *= 10;
+                    if (goldDiggerLevel > 0) mult *= UPGRADES[UpgradeType.PRESTIGE_GOLD_DIGGER].getEffect(goldDiggerLevel);
+                    if (veteranLevel > 0) mult *= Math.max(1, 1 + (prev.prestigeLevel * 0.10));
+                    if (prev.isHardMode) mult *= 10;
+                    const prestigeMult = 1 + (prev.prestigeLevel * 0.1);
+                    totalGain += Math.floor(baseVal * mult * prestigeMult);
+                }
                 
-                const prestigeMult = 1 + (prev.prestigeLevel * 0.1);
-                const gain = Math.floor(baseVal * multiplier * prestigeMult);
-                
-                newState.money += gain;
+                newState.money += totalGain;
                 newState.streak = newStreak;
                 newState.maxStreak = Math.max(prev.maxStreak, newStreak);
-                newState.stats.highestCash = Math.max(newState.stats.highestCash, newState.money);
-                newState.history = ['H', ...prev.history].slice(0, 10) as ('H'|'T')[];
+                newState.stats = { ...newState.stats, highestCash: Math.max(newState.stats.highestCash, newState.money) };
+                newState.history = ['E', ...prev.history].slice(0, 10) as ('H'|'T'|'E')[];
+
+                // Bonus fragment at milestone via magnet
+                if (prev.isHardMode) {
+                    const magnetActive = (prev.upgrades[UpgradeType.HARD_MODE_MORE_FRAGMENTS] || 0) > 0;
+                    // Milestones crossed
+                    for (let i = 1; i <= edgeWorth; i++) {
+                        if ((prev.streak + i) % 10 === 0) {
+                            newState.voidFragments += 5 + (magnetActive ? 3 : 0);
+                        }
+                    }
+                }
                 
-                if (prev.isHardMode && newStreak % 10 === 0) {
-                    newState.voidFragments += 5;
+                // Consume multi-flip if active (edge supersedes it)
+                if (newState.upgrades[UpgradeType.HARD_MODE_MULTI_FLIP] > 0) {
+                    newState.upgrades = { ...newState.upgrades, [UpgradeType.HARD_MODE_MULTI_FLIP]: 0 };
+                }
+
+                setCelebration({ text: "⬡ EDGE LANDING ⬡", level: 15, id: Date.now() });
+                if (celebrationTimeoutRef.current) window.clearTimeout(celebrationTimeoutRef.current);
+                celebrationTimeoutRef.current = window.setTimeout(() => {
+                    setCelebration(null);
+                    setEdgeLanding(false);
+                }, 4000) as unknown as number;
+
+            } else if (isHeads) {
+                // ── HEADS ─────────────────────────────────────────────────────
+                const multiFlipActive = (prev.upgrades[UpgradeType.HARD_MODE_MULTI_FLIP] || 0) > 0;
+                const nickelActive = (prev.upgrades[UpgradeType.HARD_MODE_NICKEL] || 0) > 0;
+                
+                const headsWorth = multiFlipActive ? 5 : (nickelActive ? 2 : 1);
+                const newStreak = prev.streak + headsWorth;
+                
+                if (duration > 50 || newStreak % 10 === 0) AudioService.playHeads(newStreak);
+                
+                // Consume quantum collapse if used
+                if (multiFlipActive) {
+                    newState.upgrades = { ...newState.upgrades, [UpgradeType.HARD_MODE_MULTI_FLIP]: 0 };
+                }
+                
+                const comboLevel = prev.upgrades[UpgradeType.COMBO] || 0;
+                const valueLevel = prev.upgrades[UpgradeType.VALUE] || 0;
+                const edgingLevel = prev.upgrades[UpgradeType.EDGING] || 0;
+                const pEdgingLevel = prev.upgrades[UpgradeType.PRESTIGE_EDGING] || 0;
+                const goldDiggerLevel = prev.upgrades[UpgradeType.PRESTIGE_GOLD_DIGGER] || 0;
+                const veteranLevel = prev.upgrades[UpgradeType.PRESTIGE_VETERAN] || 0;
+
+                let totalGain = 0;
+                for (let i = 0; i < headsWorth; i++) {
+                    const streakAtStep = prev.streak + i + 1;
+                    let baseVal = UPGRADES[UpgradeType.VALUE].getEffect(valueLevel);
+                    let comboMult = UPGRADES[UpgradeType.COMBO].getEffect(comboLevel);
+                    if (streakAtStep > 1) baseVal *= (1 + (streakAtStep * (comboMult - 1)));
+                    let mult = 1;
+                    if (edgingLevel > 0) mult *= 10;
+                    if (pEdgingLevel > 0) mult *= 10;
+                    if (goldDiggerLevel > 0) mult *= UPGRADES[UpgradeType.PRESTIGE_GOLD_DIGGER].getEffect(goldDiggerLevel);
+                    if (veteranLevel > 0) mult *= Math.max(1, 1 + (prev.prestigeLevel * 0.10));
+                    if (prev.isHardMode) mult *= 10;
+                    const prestigeMult = 1 + (prev.prestigeLevel * 0.1);
+                    totalGain += Math.floor(baseVal * mult * prestigeMult);
+                }
+                
+                newState.money += totalGain;
+                newState.streak = newStreak;
+                newState.maxStreak = Math.max(prev.maxStreak, newStreak);
+                newState.stats = { ...newState.stats, highestCash: Math.max(newState.stats.highestCash, newState.money) };
+                newState.history = ['H', ...prev.history].slice(0, 10) as ('H'|'T'|'E')[];
+                
+                if (prev.isHardMode) {
+                    const magnetActive = (prev.upgrades[UpgradeType.HARD_MODE_MORE_FRAGMENTS] || 0) > 0;
+                    // Check milestones crossed
+                    for (let i = 1; i <= headsWorth; i++) {
+                        if ((prev.streak + i) % 10 === 0) {
+                            newState.voidFragments += 5 + (magnetActive ? 3 : 0);
+                        }
+                    }
                 }
                 
                 if (newStreak >= 2) {
@@ -396,9 +498,20 @@ const App: React.FC = () => {
                 }
 
             } else {
+                // ── TAILS ─────────────────────────────────────────────────────
                 if (duration > 50) AudioService.playTails();
-                newState.streak = 0;
-                newState.history = ['T', ...prev.history].slice(0, 10) as ('H'|'T')[];
+                
+                const forgivenessActive = (prev.upgrades[UpgradeType.HARD_MODE_FORGIVENESS] || 0) > 0;
+                
+                if (forgivenessActive) {
+                    // Safety Net absorbs the tail — consume it, don't reset streak
+                    newState.upgrades = { ...newState.upgrades, [UpgradeType.HARD_MODE_FORGIVENESS]: 0 };
+                    // But we still play tails sound + show in history
+                    newState.history = ['T', ...prev.history].slice(0, 10) as ('H'|'T'|'E')[];
+                } else {
+                    newState.streak = 0;
+                    newState.history = ['T', ...prev.history].slice(0, 10) as ('H'|'T'|'E')[];
+                }
                 
                 const passiveLevel = prev.upgrades[UpgradeType.PASSIVE_INCOME] || 0;
                 const voidSiphonLevel = prev.upgrades[UpgradeType.PRESTIGE_PASSIVE] || 0;
@@ -426,18 +539,14 @@ const App: React.FC = () => {
         setIsFlipping(false);
     }, duration) as unknown as number;
 
-  }, [isFlipping, hasWon, showMomModal, calculateChance, gameState.upgrades, gameState.prestigeLevel, gameState.isHardMode]);
+  }, [isFlipping, hasWon, showMomModal, calculateChance, gameState.upgrades, gameState.prestigeLevel, gameState.isHardMode, gameState.flipSpeedMultiplier]);
 
-  // ── Click-anywhere-to-flip ─────────────────────────────────────────────────
-  // Fires on clicks within the main game panel. Skipped if the click target
-  // (or any of its ancestors) is an interactive element or a modal/overlay.
   const INTERACTIVE_SELECTOR =
     'button, a, input, select, textarea, label, [role="button"], [role="dialog"], [role="listbox"], [data-no-flip]';
 
   const handleGameAreaClick = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
       const target = e.target as HTMLElement;
-      // Bail out when clicking anything interactive
       if (target.closest(INTERACTIVE_SELECTOR)) return;
       handleFlip(false);
     },
@@ -449,6 +558,8 @@ const App: React.FC = () => {
     const goal = gameState.isHardMode ? HARD_MODE_WINNING_STREAK + (gameState.stats.hardModeWins * 5) : WINNING_STREAK;
     
     if (gameState.streak >= goal && !hasWon) {
+        // ── FIX: capture goal BEFORE incrementing hardModeWins ──────────────
+        setWonAtGoal(goal);
         setHasWon(true);
         setGameState(prev => {
              const newStats = { ...prev.stats };
@@ -466,6 +577,19 @@ const App: React.FC = () => {
              const updates: { category: keyof GlobalLeaderboard, entry: LeaderboardEntry }[] = [];
              if (gameState.isPuristRun) updates.push({ category: 'purist', entry: { name: gameState.playerName, score: gameState.stats.puristWins + 1, date: Date.now() } });
              updates.push({ category: 'rich', entry: { name: gameState.playerName, score: gameState.stats.highestCash, date: Date.now() } });
+             
+             // Hard Mode leaderboard: score = total hard mode wins (after this win)
+             if (gameState.isHardMode) {
+                 updates.push({ 
+                     category: 'hardMode', 
+                     entry: { 
+                         name: gameState.playerName, 
+                         score: gameState.stats.hardModeWins + 1, 
+                         date: Date.now(),
+                         title: gameState.activeTitle || undefined
+                     }
+                 });
+             }
              
              if (updates.length > 0) LeaderboardService.submitScores(updates);
         }
@@ -534,6 +658,8 @@ const App: React.FC = () => {
       if (bestP > 0) updates.push({ category: 'prestige', entry: { name: gameState.playerName, score: bestP, date: Date.now(), title: gameState.activeTitle || undefined } });
       
       if (gameState.stats.momPurchases > 0) updates.push({ category: 'mommy', entry: { name: gameState.playerName, score: gameState.stats.momPurchases, date: Date.now(), title: gameState.activeTitle || undefined } });
+      
+      if (gameState.stats.hardModeWins > 0) updates.push({ category: 'hardMode', entry: { name: gameState.playerName, score: gameState.stats.hardModeWins, date: Date.now(), title: gameState.activeTitle || undefined } });
 
       if (updates.length > 0) await LeaderboardService.submitScores(updates);
   }, [gameState]);
@@ -545,7 +671,7 @@ const App: React.FC = () => {
              const newState = { ...prev };
              newState.money -= cost;
              newState.voidFragments += 25;
-             newState.upgrades[id] = (prev.upgrades[id] || 0) + 1;
+             newState.upgrades = { ...newState.upgrades, [id]: (prev.upgrades[id] || 0) + 1 };
              AudioService.playFlip();
              return newState;
           }
@@ -574,10 +700,10 @@ const App: React.FC = () => {
              newState.money += (newVal - oldVal);
           }
 
-          newState.upgrades[id] = (prev.upgrades[id] || 0) + 1;
+          newState.upgrades = { ...newState.upgrades, [id]: (prev.upgrades[id] || 0) + 1 };
           
           if (id === UpgradeType.PRESTIGE_MOM) {
-              newState.stats.momPurchases++;
+              newState.stats = { ...newState.stats, momPurchases: newState.stats.momPurchases + 1 };
           }
           
           return newState;
@@ -620,6 +746,7 @@ const App: React.FC = () => {
   const toggleAutoFlip = () => setGameState(p => ({ ...p, autoFlipEnabled: !p.autoFlipEnabled }));
   const toggleAutoBuy = () => setGameState(p => ({ ...p, autoBuyEnabled: !p.autoBuyEnabled }));
   const togglePartyPooper = () => setGameState(p => ({ ...p, partyPooperEnabled: !p.partyPooperEnabled }));
+  const setFlipSpeedMultiplier = (val: number) => setGameState(p => ({ ...p, flipSpeedMultiplier: val }));
   const handleSeen = (id: UpgradeType) => {
       if (!gameState.seenUpgrades.includes(id)) {
           setGameState(p => ({ ...p, seenUpgrades: [...p.seenUpgrades, id] }));
@@ -643,6 +770,7 @@ const App: React.FC = () => {
       if (gameState.stats.puristWins > 0) updates.push({ category: 'purist', entry: { name, score: gameState.stats.puristWins, date: Date.now(), title }});
       const bestP = Math.max(gameState.prestigeLevel, gameState.stats.maxPrestigeLevel);
       if (bestP > 0) updates.push({ category: 'prestige', entry: { name, score: bestP, date: Date.now(), title: gameState.activeTitle || undefined } });
+      if (gameState.stats.hardModeWins > 0) updates.push({ category: 'hardMode', entry: { name, score: gameState.stats.hardModeWins, date: Date.now(), title }});
       
       if (updates.length > 0) LeaderboardService.submitScores(updates);
   };
@@ -668,6 +796,18 @@ const App: React.FC = () => {
         if ((e.target as HTMLElement).tagName === 'INPUT') return;
         if (e.code === 'Space') { e.preventDefault(); handleFlip(false); }
         if (e.code === 'KeyQ') { handleFlip(true); setGameState(p => ({ ...p, hasCheated: true, voidFragments: p.voidFragments + 5 })); }
+        // DEBUG: P = trigger edge animation without affecting streak/goal
+        if (e.code === 'KeyP' && !isFlipping && !hasWon) {
+            setCoinSide('E');
+            setEdgeLanding(true);
+            AudioService.playWin();
+            setCelebration({ text: '⬡ EDGE LANDING ⬡', level: 15, id: Date.now() });
+            if (celebrationTimeoutRef.current) window.clearTimeout(celebrationTimeoutRef.current);
+            celebrationTimeoutRef.current = window.setTimeout(() => {
+                setCelebration(null);
+                setEdgeLanding(false);
+            }, 4000) as unknown as number;
+        }
         if (e.key) {
            cheatCodeBuffer.current = (cheatCodeBuffer.current + e.key).toUpperCase().slice(-3);
            if (cheatCodeBuffer.current === "ZEX") {
@@ -709,13 +849,22 @@ const App: React.FC = () => {
       return (map[key] || key) + suffix;
   };
 
-  // Whether any blocking overlay is visible (prevents stray clicks from flipping)
   const anyModalOpen =
     showModal ||
     showLeaderboard ||
     showMomModal.show ||
     showHardModePrompt ||
     showTitleSelector;
+
+  // Coin display transform
+  const getCoinTransform = () => {
+    if (isFlipping) return undefined;
+    if (!coinSide) return undefined;
+    if (coinSide === 'H') return 'rotateX(0deg)';
+    if (coinSide === 'T') return 'rotateX(180deg)';
+    if (coinSide === 'E') return 'rotateX(90deg)';
+    return undefined;
+  };
 
   return (
     <div className={`min-h-screen md:h-screen md:overflow-hidden overflow-y-auto bg-noir-950 text-noir-200 font-sans flex flex-col md:flex-row relative transition-colors duration-200 ${celebration && celebration.level >= 8 ? 'bg-noir-900' : ''}`}>
@@ -724,9 +873,16 @@ const App: React.FC = () => {
       <div className="bg-vignette pointer-events-none fixed inset-0 z-0" />
       <ConfettiSystem streak={gameState.streak} isRichMode={gameState.money > 1e6 && gameState.activeTitle === 'RICH'} activeTitle={gameState.activeTitle} momPurchases={gameState.stats.momPurchases} partyPooperEnabled={gameState.partyPooperEnabled} />
 
-      {/* Party Pooper dark overlay */}
       {gameState.partyPooperEnabled && (gameState.upgrades[UpgradeType.PRESTIGE_PARTY_POOPER] || 0) > 0 && (
         <div className="fixed inset-0 bg-black/30 pointer-events-none z-[55] transition-opacity duration-500" />
+      )}
+      
+      {/* Edge Landing Dramatic Overlay */}
+      {edgeLanding && (
+        <div className="fixed inset-0 z-[85] pointer-events-none overflow-hidden">
+          <div className="absolute inset-0 bg-gradient-to-br from-amber-500/10 via-transparent to-cyan-500/10 animate-edge-glow" />
+          <div className="absolute inset-0 border-4 border-amber-400/40 animate-edge-border-pulse" />
+        </div>
       )}
       
       {gameState.activeTitle && (
@@ -756,7 +912,6 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* ── Title selector modal ───────────────────────────────────────────── */}
       {showTitleSelector && (
           <div data-no-flip className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in" onClick={() => setShowTitleSelector(false)}>
               <div className="bg-noir-900 border border-noir-700 p-6 max-w-sm w-full shadow-2xl" onClick={e => e.stopPropagation()}>
@@ -773,7 +928,6 @@ const App: React.FC = () => {
           </div>
       )}
       
-      {/* ── Hard mode prompt modal ─────────────────────────────────────────── */}
       {showHardModePrompt && (
           <div data-no-flip className="fixed inset-0 z-[200] flex items-center justify-center bg-black/90 backdrop-blur-md p-6 animate-fade-in">
               <div className="max-w-lg w-full bg-noir-950 border border-red-900 p-8 shadow-[0_0_50px_rgba(220,38,38,0.2)] text-center">
@@ -789,6 +943,7 @@ const App: React.FC = () => {
                       <li className="flex items-center gap-2"><span className="text-red-500">-</span> Win Streak Requirement: {HARD_MODE_WINNING_STREAK + (gameState.stats.hardModeWins * 5)} (+5 per Hard Win)</li>
                       <li className="flex items-center gap-2"><span className="text-green-500">+</span> Access to Void Injection (+20% Buff)</li>
                       <li className="flex items-center gap-2"><span className="text-green-500">+</span> Permanent 10x Cash Multiplier</li>
+                      <li className="flex items-center gap-2"><span className="text-amber-500">⬡</span> Edge Landing: 1% chance = 10 Heads!</li>
                   </ul>
                   <div className="flex gap-4">
                       <button onClick={closeHardModePrompt} className="flex-1 py-3 border border-noir-700 text-noir-500 hover:bg-noir-900 hover:text-white transition-colors font-mono">DECLINE</button>
@@ -801,16 +956,24 @@ const App: React.FC = () => {
       {celebration && (
         <div className={`pointer-events-none fixed inset-0 z-[90] flex items-center justify-center flex-col overflow-hidden`}>
             {celebration.level >= 5 && !gameState.partyPooperEnabled && <div className="absolute inset-0 bg-white/20 animate-flash mix-blend-overlay"></div>}
+            {/* Edge landing special flash */}
+            {celebration.text.includes('EDGE') && !gameState.partyPooperEnabled && (
+              <div className="absolute inset-0 bg-amber-400/30 animate-flash mix-blend-overlay"></div>
+            )}
             <div className={`${celebration.level >= 8 ? 'animate-shake' : ''} flex flex-col items-center justify-center px-4`}>
-                <h2 key={celebration.id} className={`font-mono font-bold drop-shadow-[0_0_15px_rgba(251,191,36,0.6)] text-center transition-transform duration-300 max-w-[90vw] break-words leading-tight ${celebration.level >= 9 ? 'text-7xl md:text-9xl text-amber-500 animate-scale-slam' : celebration.level >= 5 ? 'text-6xl md:text-8xl text-amber-400 animate-pop-up' : 'text-4xl md:text-6xl text-amber-200/80 animate-pop-in-up'}`}>
+                <h2 key={celebration.id} className={`font-mono font-bold drop-shadow-[0_0_15px_rgba(251,191,36,0.6)] text-center transition-transform duration-300 max-w-[90vw] break-words leading-tight ${celebration.text.includes('EDGE') ? 'text-5xl md:text-7xl text-amber-300 animate-edge-text' : celebration.level >= 9 ? 'text-7xl md:text-9xl text-amber-500 animate-scale-slam' : celebration.level >= 5 ? 'text-6xl md:text-8xl text-amber-400 animate-pop-up' : 'text-4xl md:text-6xl text-amber-200/80 animate-pop-in-up'}`}>
                     {celebration.text}
                 </h2>
-                <div className={`mt-2 md:mt-4 font-mono font-bold tracking-[0.5em] md:tracking-[1em] text-white/90 uppercase ${celebration.level >= 7 ? 'text-2xl animate-pulse' : 'text-sm'}`}>{celebration.level}x STREAK</div>
+                {!celebration.text.includes('EDGE') && (
+                  <div className={`mt-2 md:mt-4 font-mono font-bold tracking-[0.5em] md:tracking-[1em] text-white/90 uppercase ${celebration.level >= 7 ? 'text-2xl animate-pulse' : 'text-sm'}`}>{celebration.level}x STREAK</div>
+                )}
+                {celebration.text.includes('EDGE') && (
+                  <div className="mt-4 font-mono font-bold tracking-[0.3em] text-amber-300/90 text-lg animate-pulse">+10 HEADS • WORTH $$$</div>
+                )}
             </div>
         </div>
       )}
       
-      {/* ── Mom modal ─────────────────────────────────────────────────────── */}
       {showMomModal.show && (
           <div data-no-flip className="fixed inset-0 z-[200] bg-black flex items-center justify-center p-6 animate-fade-in">
               <div className="max-w-md w-full text-center space-y-8">
@@ -821,7 +984,6 @@ const App: React.FC = () => {
           </div>
       )}
 
-      {/* ── Main game panel (click anywhere here to flip) ─────────────────── */}
       <div
         className="flex-1 flex flex-col relative min-h-[600px] md:min-h-0 z-10"
         onClick={anyModalOpen ? undefined : handleGameAreaClick}
@@ -833,6 +995,7 @@ const App: React.FC = () => {
                     <div className="flex flex-col"><span className="text-[10px] uppercase tracking-widest text-noir-600 mb-0.5">Current Streak</span><div className="flex items-baseline gap-1"><span className={`text-2xl font-bold leading-none ${gameState.streak > 0 ? 'text-amber-500' : 'text-noir-500'}`}>{gameState.streak}</span><span className="text-noir-600">/ {currentGoal}</span></div></div>
                     <div className="flex flex-col"><span className="text-[10px] uppercase tracking-widest text-noir-600 mb-0.5">Run Best</span><span className={`text-2xl font-bold leading-none ${gameState.maxStreak > 0 ? 'text-noir-300' : 'text-noir-500'}`}>{gameState.maxStreak}</span></div>
                     {gameState.prestigeLevel > 0 && (<div className="flex flex-col"><span className="text-[10px] uppercase tracking-widest text-purple-400 mb-0.5">Prestige</span><span className="text-2xl font-bold leading-none text-purple-300">{gameState.prestigeLevel}</span></div>)}
+                    {gameState.stats.hardModeWins > 0 && (<div className="flex flex-col"><span className="text-[10px] uppercase tracking-widest text-red-400 mb-0.5">Hard Wins</span><span className="text-2xl font-bold leading-none text-red-300">{gameState.stats.hardModeWins}</span></div>)}
                 </div>
             </div>
             <div className="text-right" ref={headerFundsRef}>
@@ -849,10 +1012,12 @@ const App: React.FC = () => {
                     <h2 className="text-5xl font-mono font-bold text-white tracking-tight">IMPOSSIBLE.</h2>
                     <div className="text-noir-300 font-mono leading-relaxed space-y-2">
                         <p>You defied the probability.</p>
-                        <p className="text-amber-400 font-bold text-xl">{currentGoal} Heads in a row.</p>
+                        {/* ── FIX: use wonAtGoal instead of currentGoal ── */}
+                        <p className="text-amber-400 font-bold text-xl">{wonAtGoal} Heads in a row.</p>
                         <div className="pt-4 border-t border-noir-800 mt-4">
                             <p className="text-sm">Total Attempts: {gameState.totalFlips.toLocaleString()}</p>
                             <p className="text-purple-400 font-bold text-lg mt-2 flex items-center justify-center gap-2"><Sparkles size={16} /> REWARD: {FRAGMENTS_PER_WIN} VOID FRAGMENTS</p>
+                            {gameState.isHardMode && <p className="text-red-400 font-bold text-sm mt-1 flex items-center justify-center gap-2"><Skull size={14} /> Hard Mode Win #{gameState.stats.hardModeWins}</p>}
                         </div>
                     </div>
                     <div className="flex flex-col gap-3 pt-4 relative z-50">
@@ -862,12 +1027,30 @@ const App: React.FC = () => {
                 </div>
             ) : (
                 <div className="flex flex-col items-center gap-16 w-full max-w-md z-10">
+                    {/* Coin */}
                     <div className="relative w-64 h-64 perspective-1000 flex items-center justify-center">
                         <div className="absolute bottom-10 w-32 h-4 bg-black/40 blur-xl rounded-[100%]" style={{ animation: isFlipping ? `shadowScale ${Math.max(1, UPGRADES[UpgradeType.SPEED].getEffect(gameState.upgrades[UpgradeType.SPEED]) - (UPGRADES[UpgradeType.PRESTIGE_FLUX].getEffect(gameState.upgrades[UpgradeType.PRESTIGE_FLUX] || 0) * 250))}ms cubic-bezier(0.5, 0, 0.5, 1) forwards` : 'none' }}></div>
-                        <div className="w-48 h-48 relative preserve-3d" style={{ animation: isFlipping ? `tossHeight ${Math.max(1, UPGRADES[UpgradeType.SPEED].getEffect(gameState.upgrades[UpgradeType.SPEED]) - (UPGRADES[UpgradeType.PRESTIGE_FLUX].getEffect(gameState.upgrades[UpgradeType.PRESTIGE_FLUX] || 0) * 250))}ms cubic-bezier(0.5, 0, 0.5, 1) forwards` : 'none' }}>
-                            <div className="w-full h-full relative preserve-3d" style={{ animation: isFlipping ? `tossSpin ${Math.max(1, UPGRADES[UpgradeType.SPEED].getEffect(gameState.upgrades[UpgradeType.SPEED]) - (UPGRADES[UpgradeType.PRESTIGE_FLUX].getEffect(gameState.upgrades[UpgradeType.PRESTIGE_FLUX] || 0) * 250))}ms linear infinite` : 'none', transform: !isFlipping && coinSide ? (coinSide === 'T' ? 'rotateX(180deg)' : 'rotateX(0deg)') : undefined }}>
+                        <div className="w-48 h-48 relative preserve-3d" style={{ animation: isFlipping ? (coinSide === 'E' ? `edgeTossHeight ${Math.max(1, UPGRADES[UpgradeType.SPEED].getEffect(gameState.upgrades[UpgradeType.SPEED]) - (UPGRADES[UpgradeType.PRESTIGE_FLUX].getEffect(gameState.upgrades[UpgradeType.PRESTIGE_FLUX] || 0) * 250))}ms cubic-bezier(0.5, 0, 0.5, 1) forwards` : `tossHeight ${Math.max(1, UPGRADES[UpgradeType.SPEED].getEffect(gameState.upgrades[UpgradeType.SPEED]) - (UPGRADES[UpgradeType.PRESTIGE_FLUX].getEffect(gameState.upgrades[UpgradeType.PRESTIGE_FLUX] || 0) * 250))}ms cubic-bezier(0.5, 0, 0.5, 1) forwards`) : 'none' }}>
+                            <div className="w-full h-full relative preserve-3d" style={{ animation: isFlipping ? `tossSpin ${Math.max(1, UPGRADES[UpgradeType.SPEED].getEffect(gameState.upgrades[UpgradeType.SPEED]) - (UPGRADES[UpgradeType.PRESTIGE_FLUX].getEffect(gameState.upgrades[UpgradeType.PRESTIGE_FLUX] || 0) * 250))}ms linear infinite` : 'none', transform: !isFlipping && coinSide ? getCoinTransform() : undefined, transition: coinSide === 'E' ? 'transform 1.2s cubic-bezier(0.34, 1.56, 0.64, 1)' : undefined }}>
+                                {/* Heads face */}
                                 <div className="absolute inset-0 backface-hidden rounded-full bg-gradient-to-br from-amber-200 via-amber-500 to-amber-700 shadow-inner border-4 border-amber-600 flex items-center justify-center overflow-hidden" style={{ transform: 'rotateX(0deg)' }}><div className="absolute inset-0 opacity-20 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')]"></div><span className="text-8xl font-serif font-bold text-amber-950 mix-blend-overlay drop-shadow-md relative z-10">$</span></div>
+                                {/* Tails face */}
                                 <div className="absolute inset-0 backface-hidden rounded-full bg-gradient-to-br from-slate-200 via-slate-400 to-slate-600 shadow-inner border-4 border-slate-500 flex items-center justify-center overflow-hidden" style={{ transform: 'rotateX(180deg)' }}><div className="absolute inset-0 opacity-20 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')]"></div><div className="relative w-full h-full z-10 opacity-70"><div className="absolute top-[35%] left-[28%] w-[14%] h-[14%] bg-slate-900 rounded-full mix-blend-overlay shadow-sm"></div><div className="absolute top-[35%] right-[28%] w-[14%] h-[14%] bg-slate-900 rounded-full mix-blend-overlay shadow-sm"></div><div className="absolute top-[52%] left-1/2 -translate-x-1/2 w-[55%] h-[35%] border-t-[10px] border-slate-900 rounded-[50%] mix-blend-overlay"></div></div></div>
+                                {/* Edge face — shown when rotateX(90deg) */}
+                                <div className="absolute backface-hidden flex items-center justify-center overflow-hidden"
+                                     style={{ 
+                                       transform: 'rotateX(90deg)', 
+                                       width: '100%', 
+                                       height: '16px', 
+                                       top: '50%', 
+                                       left: 0, 
+                                       marginTop: '-8px',
+                                       background: 'linear-gradient(90deg, #b45309, #f59e0b, #fcd34d, #f59e0b, #b45309)',
+                                       borderRadius: '4px',
+                                       boxShadow: '0 0 20px rgba(251,191,36,0.8), 0 0 40px rgba(251,191,36,0.4)',
+                                     }}>
+                                    <span className="text-[8px] font-mono font-bold text-amber-950 tracking-[0.3em] uppercase select-none">⬡ EDGE ⬡</span>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -878,7 +1061,7 @@ const App: React.FC = () => {
                              <div className="text-[10px] uppercase tracking-widest text-noir-500">Probability</div>
                              <div className="font-mono text-amber-500 text-lg font-bold flex items-center gap-2">{(calculateChance() * 100).toFixed(0)}%{gameState.upgrades[UpgradeType.HARD_MODE_BUFF] > 0 && <Syringe size={14} className="text-red-500 animate-pulse" />}</div>
                              {(gameState.upgrades[UpgradeType.PRESTIGE_FATE] || 0) > 0 && <div className="text-[10px] text-purple-400 font-mono">(+{((gameState.upgrades[UpgradeType.PRESTIGE_FATE] || 0) * 2.5).toFixed(0)}% Base)</div>}
-                             {gameState.isHardMode && <div className="text-[10px] text-red-500 font-mono font-bold mt-1">CAP: 60%</div>}
+                             {gameState.isHardMode && <div className="text-[10px] text-red-500 font-mono font-bold mt-1">CAP: 60% · EDGE: 1%</div>}
                         </div>
                     </div>
                 </div>
@@ -889,7 +1072,7 @@ const App: React.FC = () => {
             <div className="flex gap-3 overflow-hidden mask-linear-fade items-center">
                 <span className="text-[10px] uppercase tracking-widest text-noir-700 mr-2">History</span>
                 {gameState.history.map((res, i) => (
-                    <div key={i} className={`w-8 h-8 flex items-center justify-center font-mono font-bold rounded-sm text-xs shadow-lg transition-transform hover:scale-110 cursor-default ${res === 'H' ? 'bg-gradient-to-b from-amber-500 to-amber-700 text-white border border-amber-400' : 'bg-gradient-to-b from-noir-700 to-noir-800 text-noir-400 border border-noir-600'}`}>{res === 'H' ? '$' : <span className="rotate-90 inline-block text-[8px] tracking-tighter font-sans scale-y-150 transform-gpu">:(</span>}</div>
+                    <div key={i} className={`w-8 h-8 flex items-center justify-center font-mono font-bold rounded-sm text-xs shadow-lg transition-transform hover:scale-110 cursor-default ${res === 'H' ? 'bg-gradient-to-b from-amber-500 to-amber-700 text-white border border-amber-400' : res === 'E' ? 'bg-gradient-to-b from-amber-300 to-amber-500 text-amber-950 border border-amber-300 shadow-[0_0_6px_rgba(251,191,36,0.6)]' : 'bg-gradient-to-b from-noir-700 to-noir-800 text-noir-400 border border-noir-600'}`}>{res === 'H' ? '$' : res === 'E' ? '⬡' : <span className="rotate-90 inline-block text-[8px] tracking-tighter font-sans scale-y-150 transform-gpu">:(</span>}</div>
                 ))}
             </div>
             
@@ -899,7 +1082,6 @@ const App: React.FC = () => {
                         <Skull size={20} />
                     </button>
                  )}
-                 {/* ── Leaderboard button: visible once the player has ever won ── */}
                  {(gameState.playerName || hasEverWon) && (
                      <button onClick={() => setShowLeaderboard(true)} className="p-2 text-amber-500 hover:text-white transition-colors hover:bg-amber-900/50 rounded-full cursor-pointer animate-fade-in" title="Leaderboard"><List size={20} /></button>
                  )}
@@ -929,6 +1111,8 @@ const App: React.FC = () => {
         momPurchases={gameState.stats.momPurchases}
         isHardMode={gameState.isHardMode}
         playerStats={gameState.stats}
+        flipSpeedMultiplier={gameState.flipSpeedMultiplier}
+        onSetFlipSpeed={setFlipSpeedMultiplier}
       />
 
       <div className="relative z-[100]">
@@ -938,11 +1122,11 @@ const App: React.FC = () => {
             onClose={() => setShowLeaderboard(false)} 
             playerName={gameState.playerName} 
             onRegisterName={registerName} 
-            currentStats={{ purist: gameState.stats.puristWins, prestige: gameState.stats.maxPrestigeLevel, rich: gameState.stats.highestCash, mommy: gameState.stats.momPurchases }}
+            currentStats={{ purist: gameState.stats.puristWins, prestige: gameState.stats.maxPrestigeLevel, rich: gameState.stats.highestCash, mommy: gameState.stats.momPurchases, hardMode: gameState.stats.hardModeWins }}
             onSubmitRun={handleManualSubmit}
         />
       </div>
-      <style>{`.rotate-x-180 { transform: rotateX(180deg); } .mask-linear-fade { mask-image: linear-gradient(to right, transparent, black 10%, black 90%, transparent); -webkit-mask-image: linear-gradient(to right, transparent, black 10%, black 90%, transparent); } @keyframes popInUp { 0% { opacity: 0; transform: translateY(20px) scale(0.9); } 100% { opacity: 1; transform: translateY(0) scale(1); } } .animate-pop-in-up { animation: popInUp 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; } @keyframes popUp { 0% { opacity: 0; transform: scale(0.5); } 50% { opacity: 1; transform: scale(1.1); } 100% { opacity: 1; transform: scale(1); } } .animate-pop-up { animation: popUp 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; } @keyframes scaleSlam { 0% { opacity: 0; transform: scale(5); } 60% { opacity: 1; transform: scale(0.9); } 100% { opacity: 1; transform: scale(1); } } .animate-scale-slam { animation: scaleSlam 0.5s cubic-bezier(0.6, -0.28, 0.735, 0.045) forwards; } @keyframes flash { 0%, 100% { opacity: 0; } 10%, 90% { opacity: 1; } } .animate-flash { animation: flash 0.3s ease-out forwards; } @keyframes shake { 0%, 100% { transform: translateX(0); } 10%, 30%, 50%, 70%, 90% { transform: translateX(-5px) rotate(-1deg); } 20%, 40%, 60%, 80% { transform: translateX(5px) rotate(1deg); } } .animate-shake { animation: shake 0.5s ease-in-out; } @keyframes particle { 0% { transform: translate(0, 0) scale(1); opacity: 1; } 100% { transform: translate(var(--tw-translate-x, 100px), var(--tw-translate-y, 100px)) scale(0); opacity: 0; } } .animate-particle { animation: particle 1s ease-out forwards; }`}</style>
+      <style>{`.rotate-x-180 { transform: rotateX(180deg); } .mask-linear-fade { mask-image: linear-gradient(to right, transparent, black 10%, black 90%, transparent); -webkit-mask-image: linear-gradient(to right, transparent, black 10%, black 90%, transparent); } @keyframes popInUp { 0% { opacity: 0; transform: translateY(20px) scale(0.9); } 100% { opacity: 1; transform: translateY(0) scale(1); } } .animate-pop-in-up { animation: popInUp 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; } @keyframes popUp { 0% { opacity: 0; transform: scale(0.5); } 50% { opacity: 1; transform: scale(1.1); } 100% { opacity: 1; transform: scale(1); } } .animate-pop-up { animation: popUp 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; } @keyframes scaleSlam { 0% { opacity: 0; transform: scale(5); } 60% { opacity: 1; transform: scale(0.9); } 100% { opacity: 1; transform: scale(1); } } .animate-scale-slam { animation: scaleSlam 0.5s cubic-bezier(0.6, -0.28, 0.735, 0.045) forwards; } @keyframes flash { 0%, 100% { opacity: 0; } 10%, 90% { opacity: 1; } } .animate-flash { animation: flash 0.3s ease-out forwards; } @keyframes shake { 0%, 100% { transform: translateX(0); } 10%, 30%, 50%, 70%, 90% { transform: translateX(-5px) rotate(-1deg); } 20%, 40%, 60%, 80% { transform: translateX(5px) rotate(1deg); } } .animate-shake { animation: shake 0.5s ease-in-out; } @keyframes edgeGlow { 0%, 100% { opacity: 0; } 20%, 80% { opacity: 1; } } .animate-edge-glow { animation: edgeGlow 3s ease-in-out; } @keyframes edgeBorderPulse { 0% { opacity: 0; transform: scale(0.95); } 30% { opacity: 1; transform: scale(1.02); } 60% { opacity: 0.6; transform: scale(1); } 100% { opacity: 0; } } .animate-edge-border-pulse { animation: edgeBorderPulse 3s ease-out forwards; } @keyframes edgeText { 0% { opacity: 0; transform: scale(0.3) rotateY(90deg); } 40% { opacity: 1; transform: scale(1.1) rotateY(0deg); } 70% { transform: scale(0.95); } 100% { opacity: 1; transform: scale(1); } } .animate-edge-text { animation: edgeText 0.8s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }`}</style>
     </div>
   );
 };

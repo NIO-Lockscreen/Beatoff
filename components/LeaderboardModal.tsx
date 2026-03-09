@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { GlobalLeaderboard, LeaderboardEntry } from '../types';
 import { LeaderboardService } from '../services/leaderboardService';
-import { X, Trophy, DollarSign, Ban, Heart, Loader2, Info, RefreshCw } from 'lucide-react';
+import { X, Trophy, DollarSign, Ban, Heart, Loader2, Info, RefreshCw, Skull } from 'lucide-react';
 
 interface Props {
   isOpen: boolean;
@@ -13,6 +13,7 @@ interface Props {
       prestige: number;
       rich: number;
       mommy: number;
+      hardMode: number;
   };
   onSubmitRun?: () => void;
 }
@@ -171,6 +172,15 @@ const LeaderboardModal: React.FC<Props> = ({ isOpen, onClose, playerName, onRegi
                     secret 
                 />
             )}
+            {currentStats && currentStats.hardMode > 0 && (
+                <TabButton 
+                    active={activeTab === 'hardMode'} 
+                    onClick={() => setActiveTab('hardMode')} 
+                    icon={Skull} 
+                    label="Hard Mode" 
+                    hardMode
+                />
+            )}
           </div>
         </div>
 
@@ -181,6 +191,16 @@ const LeaderboardModal: React.FC<Props> = ({ isOpen, onClose, playerName, onRegi
                     <p className="text-xs font-mono text-noir-400 leading-relaxed">
                         <strong className="text-amber-500">PURIST RUNS:</strong> Victories achieved without ever purchasing or enabling the Auto Flipper. 
                         A test of manual endurance.
+                    </p>
+                </div>
+            )}
+
+            {activeTab === 'hardMode' && (
+                <div className="bg-red-950/20 p-4 border-b border-red-900/30 flex items-start gap-3">
+                    <Skull size={16} className="text-red-500 shrink-0 mt-0.5" />
+                    <p className="text-xs font-mono text-noir-400 leading-relaxed">
+                        <strong className="text-red-400">HARD MODE:</strong> Players who have beaten the escalating Hard Mode streak challenge. 
+                        Score = total successful Hard Mode runs. Each win adds +5 to the required streak.
                     </p>
                 </div>
             )}
@@ -200,6 +220,7 @@ const LeaderboardModal: React.FC<Props> = ({ isOpen, onClose, playerName, onRegi
                     {board && activeTab === 'prestige' && board.prestige.map((e, i) => renderEntry(e, i, (v) => `Lvl ${v}`))}
                     {board && activeTab === 'rich' && board.rich.map((e, i) => renderEntry(e, i, (v) => formatScore(v, 'money')))}
                     {board && activeTab === 'mommy' && board.mommy.map((e, i) => renderEntry(e, i, (v) => `${v} purchases`))}
+                    {board && activeTab === 'hardMode' && board.hardMode.map((e, i) => renderEntry(e, i, (v) => `${v} ${v === 1 ? 'Win' : 'Wins'}`))}
                 </div>
             )}
         </div>
@@ -214,6 +235,7 @@ const LeaderboardModal: React.FC<Props> = ({ isOpen, onClose, playerName, onRegi
                         {activeTab === 'prestige' && `Lvl ${currentStats.prestige}`}
                         {activeTab === 'rich' && formatScore(currentStats.rich, 'money')}
                         {activeTab === 'mommy' && `${currentStats.mommy}`}
+                        {activeTab === 'hardMode' && `${currentStats.hardMode} ${currentStats.hardMode === 1 ? 'Win' : 'Wins'}`}
                     </span>
                 </div>
                 {onSubmitRun && (
@@ -233,16 +255,20 @@ const LeaderboardModal: React.FC<Props> = ({ isOpen, onClose, playerName, onRegi
   );
 };
 
-const TabButton = ({ active, onClick, icon: Icon, label, secret }: any) => (
+const TabButton = ({ active, onClick, icon: Icon, label, secret, hardMode }: any) => (
     <button
         onClick={onClick}
         className={`
             flex items-center gap-2 px-4 py-2 font-mono text-sm font-bold border transition-all whitespace-nowrap
             ${active 
-                ? 'bg-amber-600 text-black border-amber-600' 
+                ? hardMode
+                    ? 'bg-red-800 text-white border-red-600'
+                    : 'bg-amber-600 text-black border-amber-600' 
                 : secret 
                     ? 'bg-pink-950/20 text-pink-500 border-pink-900/30 hover:bg-pink-900/40' 
-                    : 'bg-black text-noir-500 border-noir-700 hover:border-noir-500 hover:text-white'
+                    : hardMode
+                        ? 'bg-red-950/20 text-red-400 border-red-900/30 hover:bg-red-900/40'
+                        : 'bg-black text-noir-500 border-noir-700 hover:border-noir-500 hover:text-white'
             }
         `}
     >

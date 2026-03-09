@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { UpgradeType, PlayerStats } from '../types';
 import { UPGRADES } from '../constants';
-import { Zap, TrendingUp, Clock, Coins, PlayCircle, ShieldCheck, Flame, Ghost, Sparkles, Hourglass, Infinity, Skull, Crown, Heart, Power, Gem, Bot, Package, Syringe, Medal, VolumeX } from 'lucide-react';
+import { Zap, TrendingUp, Clock, Coins, PlayCircle, ShieldCheck, Flame, Ghost, Sparkles, Hourglass, Infinity, Skull, Crown, Heart, Power, Gem, Bot, Package, Syringe, Medal, VolumeX, Shield, Hexagon, Magnet, CircleDollarSign, Gauge } from 'lucide-react';
 
 interface ShopProps {
   money: number;
@@ -21,6 +21,8 @@ interface ShopProps {
   momPurchases: number;
   isHardMode: boolean;
   playerStats: PlayerStats;
+  flipSpeedMultiplier: number;
+  onSetFlipSpeed: (val: number) => void;
 }
 
 const ICONS = {
@@ -45,7 +47,12 @@ const ICONS = {
   [UpgradeType.PRESTIGE_CARE_PACKAGE]: Package,
   [UpgradeType.PRESTIGE_VETERAN]: Medal,
   [UpgradeType.PRESTIGE_PARTY_POOPER]: VolumeX,
+  // Hard Mode
   [UpgradeType.HARD_MODE_BUFF]: Syringe,
+  [UpgradeType.HARD_MODE_MULTI_FLIP]: Hexagon,
+  [UpgradeType.HARD_MODE_FORGIVENESS]: Shield,
+  [UpgradeType.HARD_MODE_MORE_FRAGMENTS]: Magnet,
+  [UpgradeType.HARD_MODE_NICKEL]: CircleDollarSign,
 };
 
 const Shop: React.FC<ShopProps> = ({ 
@@ -65,7 +72,9 @@ const Shop: React.FC<ShopProps> = ({
   onSeen,
   momPurchases,
   isHardMode,
-  playerStats
+  playerStats,
+  flipSpeedMultiplier,
+  onSetFlipSpeed,
 }) => {
   
   const hasLimitless = (upgrades[UpgradeType.PRESTIGE_LIMITLESS] || 0) > 0;
@@ -83,6 +92,19 @@ const Shop: React.FC<ShopProps> = ({
     // Hard Mode Check
     if (upgradeId === UpgradeType.HARD_MODE_BUFF) {
         return isHardMode;
+    }
+    if (upgradeId === UpgradeType.HARD_MODE_MULTI_FLIP) {
+        return isHardMode;
+    }
+    if (upgradeId === UpgradeType.HARD_MODE_FORGIVENESS) {
+        return isHardMode;
+    }
+    if (upgradeId === UpgradeType.HARD_MODE_MORE_FRAGMENTS) {
+        return isHardMode;
+    }
+    if (upgradeId === UpgradeType.HARD_MODE_NICKEL) {
+        // Locked behind 1 Hard Mode win
+        return isHardMode && playerStats.hardModeWins >= 1;
     }
 
     // Veteran Upgrade Check (Requires Hard Mode Win)
@@ -418,6 +440,34 @@ const Shop: React.FC<ShopProps> = ({
                 <span>VOID FRAGMENTS: {voidFragments}</span>
              </div>
         )}
+
+        {/* Flip Speed Slider */}
+        <div className="mt-3 border border-noir-800 bg-black/40 p-3 rounded">
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2 text-noir-400">
+              <Gauge size={12} />
+              <span className="text-[10px] font-mono uppercase tracking-widest">Flip Speed</span>
+            </div>
+            <span className="text-[10px] font-mono text-amber-400 font-bold">
+              {flipSpeedMultiplier === 1.0 ? '1.0×' : flipSpeedMultiplier < 1 ? `${flipSpeedMultiplier.toFixed(2)}× (slower)` : `${flipSpeedMultiplier.toFixed(1)}× (faster)`}
+            </span>
+          </div>
+          <input
+            type="range"
+            min="0.1"
+            max="3"
+            step="0.1"
+            value={flipSpeedMultiplier}
+            onChange={(e) => onSetFlipSpeed(parseFloat(e.target.value))}
+            className="w-full h-1.5 rounded-full appearance-none cursor-pointer bg-noir-800 accent-amber-500"
+            title="Adjust flip animation speed. Slower = more time to react before auto-flip lands."
+          />
+          <div className="flex justify-between text-[9px] font-mono text-noir-600 mt-1">
+            <span>SLOW</span>
+            <span>NORMAL</span>
+            <span>FAST</span>
+          </div>
+        </div>
       </div>
 
       <div className="flex-1 p-4 space-y-4 md:overflow-y-auto overflow-visible scrollbar-thin scrollbar-thumb-noir-700 scrollbar-track-transparent pb-16">

@@ -303,9 +303,57 @@ export const UPGRADES: Record<UpgradeType, UpgradeConfig> = {
     description: "One-time +20% probability boost for the NEXT flip only.",
     baseCost: 5,
     costTiers: [5],
-    maxLevel: 1, // Reset manually on flip
+    maxLevel: 1,
     isPrestige: true,
     getEffect: (level) => level > 0 ? 0.2 : 0,
     formatEffect: (val) => val > 0 ? "ACTIVE" : "+20% (1 Flip)",
+  },
+
+  [UpgradeType.HARD_MODE_MULTI_FLIP]: {
+    id: UpgradeType.HARD_MODE_MULTI_FLIP,
+    name: "Quantum Collapse",
+    description: "The next flip counts as 5 consecutive heads at once. Resets on use.",
+    baseCost: 8,
+    costTiers: [8],
+    maxLevel: 1,
+    isPrestige: true,
+    getEffect: (level) => level > 0 ? 5 : 0,
+    formatEffect: (val) => val > 0 ? "PRIMED (×5)" : "+5 Heads (1 Flip)",
+  },
+
+  [UpgradeType.HARD_MODE_FORGIVENESS]: {
+    id: UpgradeType.HARD_MODE_FORGIVENESS,
+    name: "Safety Net",
+    description: "The next Tails result won't break your streak. Extremely costly. Resets on use.",
+    baseCost: 22,
+    costTiers: [22],
+    maxLevel: 1,
+    isPrestige: true,
+    getEffect: (level) => level > 0 ? 1 : 0,
+    formatEffect: (val) => val > 0 ? "ACTIVE" : "Absorb 1 Tail",
+  },
+
+  [UpgradeType.HARD_MODE_MORE_FRAGMENTS]: {
+    id: UpgradeType.HARD_MODE_MORE_FRAGMENTS,
+    name: "Fragment Magnet",
+    description: "Earn +3 bonus Void Fragments at each 10-combo milestone during Hard Mode.",
+    baseCost: 15,
+    costTiers: [15],
+    maxLevel: 1,
+    isPrestige: true,
+    getEffect: (level) => level > 0 ? 3 : 0,
+    formatEffect: (val) => val > 0 ? "+3 Frags/Milestone" : "+3 /milestone",
+  },
+
+  [UpgradeType.HARD_MODE_NICKEL]: {
+    id: UpgradeType.HARD_MODE_NICKEL,
+    name: "Lucky Nickel",
+    description: "Each Heads permanently counts as +2 streak progress instead of +1. Locked behind 1 Hard Mode win.",
+    baseCost: 28,
+    costTiers: [28],
+    maxLevel: 1,
+    isPrestige: true,
+    getEffect: (level) => level > 0 ? 2 : 1,
+    formatEffect: (val) => val > 0 ? "×2 per Heads" : "Heads = 2 Progress",
   },
 };
