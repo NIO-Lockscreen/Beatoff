@@ -26,7 +26,11 @@ export enum UpgradeType {
   PRESTIGE_PARTY_POOPER = 'PRESTIGE_PARTY_POOPER', // Disable confetti effects
 
   // Hard Mode
-  HARD_MODE_BUFF = 'HARD_MODE_BUFF', // +20% for one flip
+  HARD_MODE_BUFF = 'HARD_MODE_BUFF', // Void Injection charges (+20% for 10 flips)
+  HARD_WARD = 'HARD_WARD',           // $ consumable: absorbs a Tails in the clutch zone (level = bought this run)
+  HARD_BULWARK = 'HARD_BULWARK',     // Abyss: +1 Ward capacity
+  HARD_MOMENTUM = 'HARD_MOMENTUM',   // Abyss: +5% Heat cap
+  HARD_STEADY = 'HARD_STEADY',       // Abyss: Ward saves halve Heat instead of resetting it
 }
 
 export interface UpgradeConfig {
@@ -38,6 +42,7 @@ export interface UpgradeConfig {
   maxLevel: number;
   limitlessMaxLevel?: number; // New max level when Limitless is active
   isPrestige?: boolean; // If true, costs Void Fragments
+  currency?: 'resolve'; // Overrides the currency (Abyss upgrades cost Resolve)
   // Function to calculate effect based on level
   getEffect: (level: number) => number;
   // Function to format the effect for display
@@ -67,7 +72,7 @@ export interface GameState {
   maxStreak: number;
   totalFlips: number;
   upgrades: Record<UpgradeType, number>;
-  history: ('H' | 'T')[];
+  history: ('H' | 'T' | 'W')[]; // W = Tails absorbed by a Ward
   
   // Prestige Data
   prestigeLevel: number; // Multiplier for global income
@@ -77,7 +82,14 @@ export interface GameState {
   partyPooperEnabled: boolean; // Toggle for Party Pooper (disables confetti)
   
   // Hard Mode
-  isHardMode: boolean; // 70% Cap, 15 Streak goal
+  isHardMode: boolean; // 60% base cap; Heat, Wards and Void Injection push past it
+  resolve: number; // Hard-only currency for Abyss upgrades
+  hardHeat: number; // Heat in % points from consecutive Heads
+  wardsHeld: number; // Wards ready to absorb a Tails in the clutch zone
+  injectionFlipsLeft: number; // Flips left on the active Void Injection
+  hardPushLevel: number; // Pushes taken past the goal this run
+  hardPushBust: boolean; // A push ended on an unabsorbed Tails
+  autoInjectEnabled: boolean; // Fire Void Injection automatically at clutch moments
   
   // UX
   seenUpgrades: UpgradeType[]; // List of upgrades user has scrolled to/seen
@@ -92,7 +104,7 @@ export interface GameState {
 }
 
 export const WINNING_STREAK = 10;
-export const HARD_MODE_WINNING_STREAK = 15;
+export const HARD_MODE_WINNING_STREAK = 25;
 export const FRAGMENTS_PER_WIN = 5;
 
 // Leaderboard Types

@@ -1,4 +1,5 @@
 import { UpgradeType, UpgradeConfig } from './types';
+import { BASE_HEAT_CAP, HEAT_CAP_PER_MOMENTUM, BASE_WARD_CAP, INJECTION_BOOST, INJECTION_FLIPS, MAX_INJECTION_CHARGES } from './hardMode';
 
 const formatLargeNumber = (val: number): string => {
     if (val >= 1e33) return '$' + (val / 1e33).toFixed(1).replace(/\.0$/, '') + 'Dc';
@@ -300,12 +301,61 @@ export const UPGRADES: Record<UpgradeType, UpgradeConfig> = {
   [UpgradeType.HARD_MODE_BUFF]: {
     id: UpgradeType.HARD_MODE_BUFF,
     name: "Void Injection",
-    description: "One-time +20% probability boost for the NEXT flip only.",
+    description: `+${Math.round(INJECTION_BOOST * 100)}% chance for ${INJECTION_FLIPS} flips, piercing the 60% cap. Buy charges, use them in the clutch.`,
     baseCost: 5,
-    costTiers: [5],
-    maxLevel: 1, // Reset manually on flip
+    costTiers: Array(MAX_INJECTION_CHARGES).fill(5),
+    maxLevel: MAX_INJECTION_CHARGES, // Charges held; one is spent per injection
     isPrestige: true,
-    getEffect: (level) => level > 0 ? 0.2 : 0,
-    formatEffect: (val) => val > 0 ? "ACTIVE" : "+20% (1 Flip)",
+    getEffect: (level) => level,
+    formatEffect: (val) => `${val}/${MAX_INJECTION_CHARGES} Charges`,
+  },
+  [UpgradeType.HARD_WARD]: {
+    id: UpgradeType.HARD_WARD,
+    name: "Ward",
+    description: "Absorbs one Tails in the clutch zone. Your streak survives, your Heat doesn't.",
+    baseCost: 1000000,
+    // Price climbs with every Ward bought this run
+    costTiers: [1e6, 1e8, 1e10, 1e12, 1e14, 1e16, 1e18, 1e20],
+    maxLevel: 8,
+    getEffect: (level) => level,
+    formatEffect: (val) => `${val} Bought`,
+  },
+
+  // --- Abyss (Hard Mode, costs Resolve) ---
+  [UpgradeType.HARD_BULWARK]: {
+    id: UpgradeType.HARD_BULWARK,
+    name: "Bulwark",
+    description: "Hold one more Ward at a time.",
+    baseCost: 25,
+    costTiers: [25, 100],
+    maxLevel: 2,
+    isPrestige: true,
+    currency: 'resolve',
+    getEffect: (level) => BASE_WARD_CAP + level,
+    formatEffect: (val) => `${val} Ward${val === 1 ? '' : 's'}`,
+  },
+  [UpgradeType.HARD_MOMENTUM]: {
+    id: UpgradeType.HARD_MOMENTUM,
+    name: "Momentum Engine",
+    description: "Raises the Heat cap. Long streaks burn hotter.",
+    baseCost: 40,
+    costTiers: [40, 120],
+    maxLevel: 2,
+    isPrestige: true,
+    currency: 'resolve',
+    getEffect: (level) => BASE_HEAT_CAP + level * HEAT_CAP_PER_MOMENTUM,
+    formatEffect: (val) => `+${val}% Max Heat`,
+  },
+  [UpgradeType.HARD_STEADY]: {
+    id: UpgradeType.HARD_STEADY,
+    name: "Steady Nerve",
+    description: "A Ward save only halves your Heat instead of wiping it.",
+    baseCost: 250,
+    costTiers: [250],
+    maxLevel: 1,
+    isPrestige: true,
+    currency: 'resolve',
+    getEffect: (level) => level,
+    formatEffect: (val) => val > 0 ? "HALF HEAT" : "HEAT LOST",
   },
 };

@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { UpgradeType, PlayerStats } from '../types';
 import { UPGRADES } from '../constants';
-import { Zap, TrendingUp, Clock, Coins, PlayCircle, ShieldCheck, Flame, Ghost, Sparkles, Hourglass, Infinity, Skull, Crown, Heart, Power, Gem, Bot, Package, Syringe, Medal, VolumeX } from 'lucide-react';
+import { getWardCap } from '../hardMode';
+import { Zap, TrendingUp, Clock, Coins, PlayCircle, ShieldCheck, Flame, Ghost, Sparkles, Hourglass, Infinity, Skull, Crown, Heart, Power, Gem, Bot, Package, Syringe, Medal, VolumeX, Shield, ShieldPlus, Gauge, Anchor } from 'lucide-react';
 
 interface ShopProps {
   money: number;
@@ -21,6 +22,8 @@ interface ShopProps {
   momPurchases: number;
   isHardMode: boolean;
   playerStats: PlayerStats;
+  resolve: number;
+  wardsHeld: number;
 }
 
 const ICONS = {
@@ -46,6 +49,10 @@ const ICONS = {
   [UpgradeType.PRESTIGE_VETERAN]: Medal,
   [UpgradeType.PRESTIGE_PARTY_POOPER]: VolumeX,
   [UpgradeType.HARD_MODE_BUFF]: Syringe,
+  [UpgradeType.HARD_WARD]: Shield,
+  [UpgradeType.HARD_BULWARK]: ShieldPlus,
+  [UpgradeType.HARD_MOMENTUM]: Gauge,
+  [UpgradeType.HARD_STEADY]: Anchor,
 };
 
 const Shop: React.FC<ShopProps> = ({ 
@@ -65,12 +72,17 @@ const Shop: React.FC<ShopProps> = ({
   onSeen,
   momPurchases,
   isHardMode,
-  playerStats
+  playerStats,
+  resolve,
+  wardsHeld
 }) => {
   
   const hasLimitless = (upgrades[UpgradeType.PRESTIGE_LIMITLESS] || 0) > 0;
   const hasPrestigeEdging = (upgrades[UpgradeType.PRESTIGE_EDGING] || 0) > 0;
   const hasPhantomHand = (upgrades[UpgradeType.PRESTIGE_AUTO] || 0) > 0;
+  const wardCap = getWardCap(upgrades);
+  // The Abyss appears once the player has touched hard mode
+  const showAbyss = isHardMode || playerStats.hardModeWins > 0 || resolve > 0;
   
   const [unseenCount, setUnseenCount] = useState(0);
   const [showPopup, setShowPopup] = useState(false);
@@ -81,8 +93,11 @@ const Shop: React.FC<ShopProps> = ({
     const upgrade = UPGRADES[upgradeId];
     
     // Hard Mode Check
-    if (upgradeId === UpgradeType.HARD_MODE_BUFF) {
+    if (upgradeId === UpgradeType.HARD_MODE_BUFF || upgradeId === UpgradeType.HARD_WARD) {
         return isHardMode;
+    }
+    if (upgrade.currency === 'resolve') {
+        return showAbyss;
     }
 
     // Veteran Upgrade Check (Requires Hard Mode Win)
@@ -131,7 +146,7 @@ const Shop: React.FC<ShopProps> = ({
     }
     
     return true;
-  }, [maxStreak, prestigeLevel, upgrades, hasPrestigeEdging, hasPhantomHand, isHardMode, playerStats.hardModeWins]);
+  }, [maxStreak, prestigeLevel, upgrades, hasPrestigeEdging, hasPhantomHand, isHardMode, playerStats.hardModeWins, showAbyss]);
 
   // Determine unseen count
   useEffect(() => {
@@ -211,20 +226,23 @@ const Shop: React.FC<ShopProps> = ({
     
     let cost = isMaxed ? 0 : (upgrade.costTiers[currentLevel] || upgrade.costTiers[upgrade.costTiers.length - 1]);
     const isPrestige = upgrade.isPrestige || false;
+    const isResolve = upgrade.currency === 'resolve';
+    const isWard = upgrade.id === UpgradeType.HARD_WARD;
+    const wardsFull = isWard && wardsHeld >= wardCap;
     
-    // Exception for Gold Digger & Mom
+    // Exception for Gold Digger & Mom (Abyss prices are never clamped)
     if (upgrade.id === UpgradeType.PRESTIGE_GOLD_DIGGER) {
         cost = upgrade.costTiers[currentLevel] || upgrade.costTiers[upgrade.costTiers.length - 1];
-    } else if (isPrestige && cost > 50) {
+    } else if (isPrestige && !isResolve && cost > 50) {
         cost = 50;
     }
     
-    const currency = isPrestige ? voidFragments : money;
+    const currency = isResolve ? resolve : isPrestige ? voidFragments : money;
     // Gold Digger is prestige but costs money
     const isGoldDigger = upgrade.id === UpgradeType.PRESTIGE_GOLD_DIGGER;
     const effectiveCurrency = isGoldDigger ? money : currency;
 
-    const canAfford = !isMaxed && effectiveCurrency >= cost;
+    const canAfford = !isMaxed && !wardsFull && effectiveCurrency >= cost;
     
     const Icon = ICONS[upgrade.id] || Zap;
     
@@ -232,13 +250,13 @@ const Shop: React.FC<ShopProps> = ({
     if (upgrade.id === UpgradeType.PASSIVE_INCOME) {
         rawEffect = rawEffect * (1 + prestigeLevel);
     }
-    const currentEffect = upgrade.formatEffect(rawEffect);
+    const currentEffect = isWard ? `Held ${wardsHeld}/${wardCap}` : upgrade.formatEffect(rawEffect);
     
     let nextEffectRaw = upgrade.getEffect(currentLevel + 1);
     if (upgrade.id === UpgradeType.PASSIVE_INCOME) {
         nextEffectRaw = nextEffectRaw * (1 + prestigeLevel);
     }
-    const nextEffect = !isMaxed ? upgrade.formatEffect(nextEffectRaw) : 'MAX';
+    const nextEffect = isWard ? (wardsFull || isMaxed ? 'FULL' : `Held ${wardsHeld + 1}/${wardCap}`) : !isMaxed ? upgrade.formatEffect(nextEffectRaw) : 'MAX';
 
     const isMom = upgrade.id === UpgradeType.PRESTIGE_MOM;
     const isAutoFlipType = (upgrade.id === UpgradeType.AUTO_FLIP || upgrade.id === UpgradeType.PRESTIGE_AUTO);
@@ -249,7 +267,7 @@ const Shop: React.FC<ShopProps> = ({
     const showPartyPooperToggle = isPartyPooperType && currentLevel > 0;
     
     const isUnseen = !seenUpgrades.includes(upgrade.id);
-    const isHardModeBuff = upgrade.id === UpgradeType.HARD_MODE_BUFF;
+    const isHardItem = upgrade.id === UpgradeType.HARD_MODE_BUFF || isWard || isResolve;
 
     // Dynamic Name Change for MOM
     let displayName = upgrade.name;
@@ -263,7 +281,7 @@ const Shop: React.FC<ShopProps> = ({
         data-upgrade-id={upgrade.id}
         className={`
             border p-3 group transition-colors animate-fade-in relative overflow-hidden
-            ${isHardModeBuff 
+            ${isHardItem 
                 ? 'bg-red-950/20 border-red-700/50 hover:border-red-500'
                 : isGoldDigger 
                     ? 'bg-amber-950/20 border-amber-700/50 hover:border-amber-500'
@@ -277,7 +295,7 @@ const Shop: React.FC<ShopProps> = ({
             ${isUnseen ? 'unseen-upgrade' : ''}
         `}
       >
-        {isPrestige && !isGoldDigger && !isHardModeBuff && (
+        {isPrestige && !isGoldDigger && !isHardItem && (
             <div className="absolute -right-4 -top-4 w-12 h-12 bg-purple-500/10 blur-xl rounded-full pointer-events-none"></div>
         )}
         
@@ -285,7 +303,7 @@ const Shop: React.FC<ShopProps> = ({
             <div className="absolute -right-4 -top-4 w-16 h-16 bg-amber-500/10 blur-xl rounded-full pointer-events-none"></div>
         )}
 
-        {isHardModeBuff && (
+        {isHardItem && (
             <div className="absolute -right-4 -top-4 w-16 h-16 bg-red-500/20 blur-xl rounded-full pointer-events-none animate-pulse"></div>
         )}
         
@@ -303,20 +321,20 @@ const Shop: React.FC<ShopProps> = ({
         )}
 
         <div className="flex justify-between items-start mb-2 relative z-10">
-          <div className={`flex items-center gap-2 ${isHardModeBuff ? 'text-red-400' : isGoldDigger ? 'text-amber-400' : isPrestige ? 'text-purple-300' : 'text-noir-200'} ${upgrade.id === UpgradeType.PRESTIGE_LIMITLESS ? 'text-amber-400' : ''} ${isMom ? 'text-pink-300' : ''}`}>
+          <div className={`flex items-center gap-2 ${isHardItem ? 'text-red-400' : isGoldDigger ? 'text-amber-400' : isPrestige ? 'text-purple-300' : 'text-noir-200'} ${upgrade.id === UpgradeType.PRESTIGE_LIMITLESS ? 'text-amber-400' : ''} ${isMom ? 'text-pink-300' : ''}`}>
             <Icon size={16} />
             <span className="font-bold font-mono text-sm">{displayName}</span>
           </div>
-          <span className={`text-xs font-mono ${isHardModeBuff ? 'text-red-500' : isPrestige && !isGoldDigger ? 'text-purple-400' : isGoldDigger ? 'text-amber-500' : 'text-noir-500'}`}>Lvl {currentLevel}</span>
+          <span className={`text-xs font-mono ${isHardItem ? 'text-red-500' : isPrestige && !isGoldDigger ? 'text-purple-400' : isGoldDigger ? 'text-amber-500' : 'text-noir-500'}`}>Lvl {currentLevel}</span>
         </div>
         
-        <p className={`text-xs mb-3 min-h-[2.5em] leading-relaxed ${isHardModeBuff ? 'text-red-200/70' : isPrestige && !isGoldDigger ? 'text-purple-200/70' : isGoldDigger ? 'text-amber-200/70' : 'text-noir-400'}`}>
+        <p className={`text-xs mb-3 min-h-[2.5em] leading-relaxed ${isHardItem ? 'text-red-200/70' : isPrestige && !isGoldDigger ? 'text-purple-200/70' : isGoldDigger ? 'text-amber-200/70' : 'text-noir-400'}`}>
           {upgrade.description}
           {isPartyPooperType && <span className="block mt-1 text-purple-400/60 italic text-[10px]">"The void demands silence."</span>}
         </p>
 
         <div className={`flex justify-between items-center text-xs font-mono mb-3 p-2 rounded ${isPrestige ? 'bg-black/40' : 'bg-noir-900'}`}>
-            <span className={isHardModeBuff ? 'text-red-300' : isPrestige && !isGoldDigger ? 'text-purple-300' : isGoldDigger ? 'text-amber-400' : 'text-noir-400'}>{currentEffect}</span>
+            <span className={isHardItem ? 'text-red-300' : isPrestige && !isGoldDigger ? 'text-purple-300' : isGoldDigger ? 'text-amber-400' : 'text-noir-400'}>{currentEffect}</span>
             <span className="text-noir-600">→</span>
             <span className={isMaxed ? 'text-amber-500' : 'text-white'}>{nextEffect}</span>
         </div>
@@ -381,7 +399,7 @@ const Shop: React.FC<ShopProps> = ({
                 ${isMaxed 
                 ? 'border-transparent text-noir-600 cursor-not-allowed bg-black/20' 
                 : canAfford
-                    ? isHardModeBuff
+                    ? isHardItem
                         ? 'border-red-500 text-red-100 hover:bg-red-900/50 hover:border-red-300 hover:shadow-[0_0_10px_rgba(239,68,68,0.2)] active:translate-y-0.5'
                         : isGoldDigger 
                             ? 'border-amber-500 text-amber-100 hover:bg-amber-900/50 hover:border-amber-300 hover:shadow-[0_0_10px_rgba(245,158,11,0.2)] active:translate-y-0.5'
@@ -390,6 +408,8 @@ const Shop: React.FC<ShopProps> = ({
                                 : isMom
                                     ? 'border-pink-500 text-pink-100 hover:bg-pink-900/50 hover:border-pink-300 hover:shadow-[0_0_10px_rgba(236,72,153,0.2)] active:translate-y-0.5'
                                     : 'border-noir-600 text-white hover:bg-noir-800 hover:border-white active:translate-y-0.5'
+                    : isHardItem
+                        ? 'border-red-900/30 text-red-800 cursor-not-allowed bg-black/20'
                     : isGoldDigger
                         ? 'border-amber-900/30 text-amber-700 cursor-not-allowed bg-black/20'
                         : isPrestige 
@@ -398,7 +418,13 @@ const Shop: React.FC<ShopProps> = ({
                 }
             `}
             >
-            {isMaxed ? 'MAXED' : `${isPrestige && !isGoldDigger ? '🟣 ' : '$'}${formatCost(cost)}`}
+            {isMaxed
+                ? (upgrade.id === UpgradeType.HARD_MODE_BUFF ? 'FULL' : 'MAXED')
+                : wardsFull
+                    ? 'FULL'
+                    : isResolve
+                        ? `${formatCost(cost)} RESOLVE`
+                        : `${isPrestige && !isGoldDigger ? '🟣 ' : '$'}${formatCost(cost)}`}
             </button>
         </div>
       </div>
@@ -416,6 +442,12 @@ const Shop: React.FC<ShopProps> = ({
              <div className="mt-3 flex items-center gap-2 text-purple-400 font-mono text-xs border border-purple-900/50 bg-purple-950/10 p-2 rounded">
                 <Ghost size={12} />
                 <span>VOID FRAGMENTS: {voidFragments}</span>
+             </div>
+        )}
+        {showAbyss && (
+             <div className="mt-2 flex items-center gap-2 text-red-400 font-mono text-xs border border-red-900/50 bg-red-950/10 p-2 rounded">
+                <Skull size={12} />
+                <span>RESOLVE: {resolve}</span>
              </div>
         )}
       </div>
@@ -440,8 +472,24 @@ const Shop: React.FC<ShopProps> = ({
                 <div className="space-y-4">
                      {Object.values(UPGRADES)
                         .filter(u => 
-                            (u.isPrestige && u.id !== UpgradeType.PRESTIGE_CARE_PACKAGE) || u.id === UpgradeType.PRESTIGE_MOM || u.id === UpgradeType.HARD_MODE_BUFF
+                            (u.isPrestige && u.id !== UpgradeType.PRESTIGE_CARE_PACKAGE && !u.currency) || u.id === UpgradeType.PRESTIGE_MOM || u.id === UpgradeType.HARD_MODE_BUFF
                         )
+                        .map(u => renderUpgrade(u.id))}
+                </div>
+            </div>
+        )}
+
+        {/* Abyss Shop - permanent hard mode upgrades bought with Resolve */}
+        {showAbyss && (
+            <div className="pt-6 mt-6 border-t border-red-900/30 relative">
+                <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-red-500/50 to-transparent"></div>
+                <h3 className="text-red-400 font-mono font-bold text-sm mb-1 flex items-center gap-2">
+                    <Skull size={14} /> THE ABYSS
+                </h3>
+                <p className="text-[10px] text-red-300/60 font-mono mb-4">Resolve is earned from Hard Mode wins and every 10-streak.</p>
+                <div className="space-y-4">
+                     {Object.values(UPGRADES)
+                        .filter(u => u.currency === 'resolve')
                         .map(u => renderUpgrade(u.id))}
                 </div>
             </div>
