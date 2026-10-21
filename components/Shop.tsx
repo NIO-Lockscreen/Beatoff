@@ -455,11 +455,22 @@ const Shop: React.FC<ShopProps> = ({
       </div>
 
       <div className="flex-1 p-4 space-y-4 md:overflow-y-auto overflow-visible scrollbar-thin scrollbar-thumb-noir-700 scrollbar-track-transparent pb-16">
+        {/* Hard mode consumables first: they're used every run */}
+        {isHardMode && (
+            <div className="space-y-4 pb-6 mb-2 border-b border-red-900/30">
+                <h3 className="text-red-400 font-mono font-bold text-sm flex items-center gap-2">
+                    <Skull size={14} /> THE GAUNTLET
+                </h3>
+                {renderUpgrade(UpgradeType.HARD_MODE_BUFF)}
+                {renderUpgrade(UpgradeType.HARD_WARD)}
+            </div>
+        )}
+
         {/* Standard Upgrades - NOW INCLUDES CARE PACKAGE */}
         <div className="space-y-4">
              {Object.values(UPGRADES)
                 .filter(u => 
-                    ((!u.isPrestige || u.id === UpgradeType.PRESTIGE_CARE_PACKAGE) && u.id !== UpgradeType.PRESTIGE_MOM && u.id !== UpgradeType.HARD_MODE_BUFF)
+                    ((!u.isPrestige || u.id === UpgradeType.PRESTIGE_CARE_PACKAGE) && u.id !== UpgradeType.PRESTIGE_MOM && u.id !== UpgradeType.HARD_MODE_BUFF && u.id !== UpgradeType.HARD_WARD)
                 )
                 .map(u => renderUpgrade(u.id))}
         </div>
@@ -474,7 +485,7 @@ const Shop: React.FC<ShopProps> = ({
                 <div className="space-y-4">
                      {Object.values(UPGRADES)
                         .filter(u => 
-                            (u.isPrestige && u.id !== UpgradeType.PRESTIGE_CARE_PACKAGE && !u.currency) || u.id === UpgradeType.PRESTIGE_MOM || u.id === UpgradeType.HARD_MODE_BUFF
+                            (u.isPrestige && u.id !== UpgradeType.PRESTIGE_CARE_PACKAGE && !u.currency && u.id !== UpgradeType.HARD_MODE_BUFF) || u.id === UpgradeType.PRESTIGE_MOM
                         )
                         .map(u => renderUpgrade(u.id))}
                 </div>
@@ -488,7 +499,7 @@ const Shop: React.FC<ShopProps> = ({
                 <h3 className="text-red-400 font-mono font-bold text-sm mb-1 flex items-center gap-2">
                     <Skull size={14} /> THE ABYSS
                 </h3>
-                <p className="text-[10px] text-red-300/60 font-mono mb-4">Resolve is earned from Hard Mode wins and every 10-streak.</p>
+                <p className="text-[10px] text-red-300/60 font-mono mb-4">Resolve is earned by winning in Hard Mode. Push for more.</p>
                 <div className="space-y-4">
                      {Object.values(UPGRADES)
                         .filter(u => u.currency === 'resolve')

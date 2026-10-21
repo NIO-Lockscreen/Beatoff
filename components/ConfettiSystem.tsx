@@ -6,6 +6,7 @@ interface ConfettiSystemProps {
   activeTitle: string | null;
   momPurchases: number;
   partyPooperEnabled?: boolean;
+  maxBurst?: number; // Particles per Heads at most (hard mode streaks run far past 10)
 }
 
 interface Particle {
@@ -43,7 +44,7 @@ const MOMMY_COLORS = [
   '#fce7f3', // pink-100
 ];
 
-const ConfettiSystem: React.FC<ConfettiSystemProps> = ({ streak, isRichMode = false, activeTitle, momPurchases, partyPooperEnabled = false }) => {
+const ConfettiSystem: React.FC<ConfettiSystemProps> = ({ streak, isRichMode = false, activeTitle, momPurchases, partyPooperEnabled = false, maxBurst = 200 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const particles = useRef<Particle[]>([]);
   const animationId = useRef<number | null>(null);
@@ -181,7 +182,7 @@ const ConfettiSystem: React.FC<ConfettiSystemProps> = ({ streak, isRichMode = fa
       if (!partyPooperEnabled) {
       const canvas = canvasRef.current;
       if (canvas) {
-         const count = Math.min(20 + (streak * 10), 200); 
+         const count = Math.min(20 + (streak * 10), maxBurst); 
          
          for (let i = 0; i < count; i++) {
             
@@ -216,7 +217,7 @@ const ConfettiSystem: React.FC<ConfettiSystemProps> = ({ streak, isRichMode = fa
       }
     }
     prevStreak.current = streak;
-  }, [streak, isRichMode, activeTitle, momPurchases]);
+  }, [streak, isRichMode, activeTitle, momPurchases, maxBurst]);
 
   return (
     <canvas 

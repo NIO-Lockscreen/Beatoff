@@ -27,17 +27,20 @@ export const INJECTION_FLIPS = 10;
 export const MAX_INJECTION_CHARGES = 3;
 export const AUTO_INJECT_MAX_CHANCE = 0.80; // Auto-inject skips moments where the boost would mostly hit the ceiling
 export const CLUTCH_PAUSE_MS = 3000;
+export const HARD_EVENT_HOLD_MS = 1200;     // Clutch/Ward/Injection banners can't be overwritten by streak pops this soon
+export const HARD_CONFETTI_BURST = 40;      // Streaks of 20-30 would otherwise bury the HUD in confetti
 
 export const PUSH_STEP = 5;
 export const MAX_PUSHES = 3;
 export const BUST_MULTIPLIER = 0.25;
 
-export const RESOLVE_PER_WIN_BASE = 10;
-export const RESOLVE_PER_WIN_STEP = 5;
-export const RESOLVE_PER_TEN_STREAK = 1;
+// Resolve only comes from wins (x Push multiplier, nothing on a bust), so progress tracks skill
+export const RESOLVE_PER_WIN_BASE = 25;
+export const RESOLVE_PER_WIN_STEP = 10;
 
 type ChanceState = Pick<GameState, 'upgrades' | 'isHardMode' | 'hardHeat' | 'injectionFlipsLeft'>;
 type GoalState = Pick<GameState, 'isHardMode' | 'hardPushLevel'> & { stats: Pick<GameState['stats'], 'hardModeWins'> };
+type InjectState = ChanceState & GoalState & Pick<GameState, 'streak'>;
 
 export const getHardGoal = (hardWins: number, pushLevel: number = 0): number => {
     const early = Math.min(hardWins, HARD_GOAL_SOFTCAP_WINS);
@@ -76,11 +79,14 @@ export const getChance = (state: ChanceState): number => {
     return hardChance(base, state.hardHeat, state.injectionFlipsLeft > 0);
 };
 
-export const canInject = (state: ChanceState): boolean =>
-    state.isHardMode && state.injectionFlipsLeft === 0 && (state.upgrades[UpgradeType.HARD_MODE_BUFF] || 0) > 0;
+// Injection is a clutch tool: only usable in the clutch zone or during a Push
+// (anywhere else, a self-funding inject at every 10-streak dominated all other play)
+export const canInject = (state: InjectState): boolean =>
+    state.isHardMode && state.injectionFlipsLeft === 0 && (state.upgrades[UpgradeType.HARD_MODE_BUFF] || 0) > 0 &&
+    (isInClutchZone(state) || state.hardPushLevel > 0);
 
 // Consumes a Void Injection charge. Returns the same object if nothing changed.
-export const inject = <T extends ChanceState>(state: T): T => {
+export const inject = <T extends InjectState>(state: T): T => {
     if (!canInject(state)) return state;
     return {
         ...state,
@@ -89,11 +95,11 @@ export const inject = <T extends ChanceState>(state: T): T => {
     };
 };
 
-export const shouldAutoInject = (state: ChanceState & Pick<GameState, 'autoInjectEnabled'>): boolean =>
+export const shouldAutoInject = (state: InjectState & Pick<GameState, 'autoInjectEnabled'>): boolean =>
     state.autoInjectEnabled && canInject(state) && getChance(state) <= AUTO_INJECT_MAX_CHANCE;
 
 // Starting a Push is the moment that matters most, so auto-inject only holds back at the ceiling
-export const shouldAutoInjectOnPush = (state: ChanceState & Pick<GameState, 'autoInjectEnabled'>): boolean =>
+export const shouldAutoInjectOnPush = (state: InjectState & Pick<GameState, 'autoInjectEnabled'>): boolean =>
     state.autoInjectEnabled && canInject(state) && getChance(state) < HARD_CHANCE_CEILING;
 
 export const getPushMultiplier = (pushLevel: number, bust: boolean): number =>
@@ -103,17 +109,19 @@ export const getHardWinRewards = (hardWins: number, pushLevel: number, bust: boo
     const mult = getPushMultiplier(pushLevel, bust);
     return {
         voidFragments: Math.max(1, Math.round(FRAGMENTS_PER_WIN * mult)),
-        resolve: Math.max(1, Math.round((RESOLVE_PER_WIN_BASE + RESOLVE_PER_WIN_STEP * hardWins) * mult)),
+        resolve: bust ? 0 : Math.round((RESOLVE_PER_WIN_BASE + RESOLVE_PER_WIN_STEP * hardWins) * mult),
     };
 };
 
 // Exact odds of landing PUSH_STEP more Heads from the current state. Wards don't
 // apply during a Push, so the only winning path is Heads every flip.
-export const getPushSuccessChance = (state: GameState): number => {
+// useInjection: whether a charge is spent as the Push starts (defaults to what auto-inject would do).
+export const getPushSuccessChance = (state: GameState, useInjection: boolean = shouldAutoInjectOnPush(state)): number => {
     const base = getBaseChance(state.upgrades);
     const heatCap = getHeatCap(state.upgrades);
+    const hasCharge = (state.upgrades[UpgradeType.HARD_MODE_BUFF] || 0) > 0;
     let heat = state.hardHeat;
-    let injFlips = shouldAutoInjectOnPush(state) ? INJECTION_FLIPS : state.injectionFlipsLeft;
+    let injFlips = useInjection && hasCharge && state.injectionFlipsLeft === 0 ? INJECTION_FLIPS : state.injectionFlipsLeft;
     let odds = 1;
     for (let i = 0; i < PUSH_STEP; i++) {
         odds *= hardChance(base, heat, injFlips > 0);

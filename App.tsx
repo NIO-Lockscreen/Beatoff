@@ -4,7 +4,8 @@ import { UPGRADES, getWardPrice } from './constants';
 import {
   getGoal, getHardGoal, getChance, getBaseChance, getClutchZoneStart, isInClutchZone, getHeatCap, getWardCap, getHardWinRewards, getPushMultiplier,
   getPushSuccessChance, inject, canInject, canWardAbsorb, shouldAutoInject, shouldAutoInjectOnPush, HEAT_PER_HEADS, HARD_BASE_CAP, HARD_CHANCE_CEILING, CLUTCH_ZONE,
-  INJECTION_BOOST, INJECTION_FLIPS, MAX_PUSHES, PUSH_STEP, CLUTCH_PAUSE_MS, RESOLVE_PER_TEN_STREAK, HARD_GOAL_STEP,
+  INJECTION_BOOST, INJECTION_FLIPS, MAX_PUSHES, PUSH_STEP, CLUTCH_PAUSE_MS, HARD_GOAL_STEP,
+  HARD_EVENT_HOLD_MS, HARD_CONFETTI_BURST,
 } from './hardMode';
 import Shop from './components/Shop';
 import ProbabilityModal from './components/ProbabilityModal';
@@ -207,10 +208,12 @@ const App: React.FC = () => {
   const [showMomModal, setShowMomModal] = useState<{show: boolean, text: string}>({show: false, text: ""});
   const [showHardModePrompt, setShowHardModePrompt] = useState(false);
   const [showRetreatConfirm, setShowRetreatConfirm] = useState(false);
+  const [showHardRules, setShowHardRules] = useState(false);
   const [ascendToHard, setAscendToHard] = useState(true);
   const [clutchPauseUntil, setClutchPauseUntil] = useState(0);
   const [hasWon, setHasWon] = useState(false);
-  const [celebration, setCelebration] = useState<{text: string, level: number, id: number} | null>(null);
+  // tone/sub mark hard mode events, which get their own colour and caption
+  const [celebration, setCelebration] = useState<{text: string, level: number, id: number, tone?: 'clutch' | 'ward' | 'inject', sub?: string} | null>(null);
   const [muted, setMuted] = useState(true);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [showTitleSelector, setShowTitleSelector] = useState(false);
@@ -222,6 +225,15 @@ const App: React.FC = () => {
   const celebrationTimeoutRef = useRef<number | undefined>(undefined);
   const deleteTimeoutRef = useRef<number | undefined>(undefined);
   const cheatCodeBuffer = useRef<string>("");
+  const celebrationHoldUntilRef = useRef(0);
+
+  // Hard mode events outrank streak pops: hold them briefly so the next Heads can't overwrite them
+  const showHardEvent = (text: string, tone: 'clutch' | 'ward' | 'inject', sub: string, level: number) => {
+      if (celebrationTimeoutRef.current) window.clearTimeout(celebrationTimeoutRef.current);
+      celebrationHoldUntilRef.current = Date.now() + HARD_EVENT_HOLD_MS;
+      setCelebration({ text, level, id: Date.now(), tone, sub });
+      celebrationTimeoutRef.current = window.setTimeout(() => setCelebration(null), 2500) as unknown as number;
+  };
 
   // Latest state for the flip timeout, which resolves after the click that started it
   const stateRef = useRef(gameState);
@@ -231,6 +243,7 @@ const App: React.FC = () => {
   const clutchZoneStart = getClutchZoneStart(currentGoal);
   const inClutchZone = isInClutchZone(gameState);
   const isClutchPaused = clutchPauseUntil > 0;
+  const hardDialogOpen = showRetreatConfirm || showHardRules || showHardModePrompt;
 
   // ── Derived: has the player ever won at least one round? ──────────────────
   // totalPrestiges increments on every ascend (which requires a win), and
@@ -377,7 +390,7 @@ const App: React.FC = () => {
   // Win screen: risk the banked win for 5 more Heads and double the reward
   const pushOnward = () => {
       setGameState(p => {
-          if (!p.isHardMode || p.hardPushBust || p.hardPushLevel >= MAX_PUSHES) return p;
+          if (!p.isHardMode || p.hardPushBust || p.hardPushLevel >= MAX_PUSHES || p.streak < getGoal(p)) return p;
           const next = { ...p, hardPushLevel: p.hardPushLevel + 1 };
           return shouldAutoInjectOnPush(next) ? inject(next) : next;
       });
@@ -386,9 +399,11 @@ const App: React.FC = () => {
   };
 
   const fireInjection = () => {
+      if (!canInject(gameState)) return;
       setGameState(p => inject(p));
       setClutchPauseUntil(0);
       AudioService.playFlip();
+      showHardEvent("INJECTED", 'inject', `+${Math.round(INJECTION_BOOST * 100)}% FOR ${INJECTION_FLIPS} FLIPS`, gameState.streak);
   };
 
   const toggleAutoInject = () => setGameState(p => ({ ...p, autoInjectEnabled: !p.autoInjectEnabled }));
@@ -415,7 +430,7 @@ const App: React.FC = () => {
         setCoinSide(result);
 
         // Entering the clutch zone on auto with auto-inject off: hold briefly so the player can choose
-        if (isHeads && isAuto && !current.autoInjectEnabled && canInject(current) &&
+        if (isHeads && isAuto && !current.autoInjectEnabled && canInject({ ...current, streak: current.streak + 1 }) &&
             current.streak + 1 === getClutchZoneStart(getGoal(current))) {
             setClutchPauseUntil(Date.now() + CLUTCH_PAUSE_MS);
         }
@@ -461,16 +476,20 @@ const App: React.FC = () => {
                 if (prev.isHardMode) {
                     newState.hardHeat = Math.min(getHeatCap(prev.upgrades), prev.hardHeat + HEAT_PER_HEADS);
                     newState.injectionFlipsLeft = Math.max(0, prev.injectionFlipsLeft - 1);
-                    if (newStreak % 10 === 0) {
-                        newState.voidFragments += 5;
-                        newState.resolve += RESOLVE_PER_TEN_STREAK;
-                    }
+                    if (newStreak % 10 === 0) newState.voidFragments += 5;
                     if (newStreak === zoneStart && shouldAutoInject(newState)) newState = inject(newState);
                 }
                 
-                if (newStreak >= 2) {
+                const toGo = getGoal(prev) - newStreak;
+                if (prev.isHardMode && newStreak === zoneStart && toGo > 0) {
+                    const injected = newState.injectionFlipsLeft === INJECTION_FLIPS;
+                    showHardEvent("CLUTCH ZONE", 'clutch', injected ? `${toGo} TO GO • INJECTED +${Math.round(INJECTION_BOOST * 100)}%` : `${toGo} TO GO`, newStreak);
+                } else if (newStreak >= 2 && Date.now() >= celebrationHoldUntilRef.current) {
                     if (celebrationTimeoutRef.current) window.clearTimeout(celebrationTimeoutRef.current);
-                    let message = CELEBRATION_MESSAGES[Math.min(newStreak, CELEBRATION_MESSAGES.length - 1)] || "GODLIKE";
+                    // In the clutch zone the old normal-mode jokes ("WHY?", "NULL") read like a crash; count down instead
+                    let message = prev.isHardMode && newStreak > zoneStart && toGo > 0
+                        ? `${toGo} TO GO`
+                        : CELEBRATION_MESSAGES[Math.min(newStreak, CELEBRATION_MESSAGES.length - 1)] || "GODLIKE";
                     setCelebration({ text: message, level: newStreak, id: Date.now() });
                     celebrationTimeoutRef.current = window.setTimeout(() => setCelebration(null), 2500) as unknown as number;
                 }
@@ -487,9 +506,8 @@ const App: React.FC = () => {
                     newState.history = ['W', ...prev.history].slice(0, 10) as GameState['history'];
                     if (shouldAutoInject(newState)) newState = inject(newState);
 
-                    if (celebrationTimeoutRef.current) window.clearTimeout(celebrationTimeoutRef.current);
-                    setCelebration({ text: "WARD BROKEN", level: prev.streak, id: Date.now() });
-                    celebrationTimeoutRef.current = window.setTimeout(() => setCelebration(null), 2500) as unknown as number;
+                    const reinjected = newState.injectionFlipsLeft === INJECTION_FLIPS;
+                    showHardEvent("WARD HELD", 'ward', reinjected ? `STREAK SAFE • INJECTED +${Math.round(INJECTION_BOOST * 100)}%` : `STREAK SAFE AT ${prev.streak}`, prev.streak);
                 } else {
                     newState.streak = 0;
                     newState.history = ['T', ...prev.history].slice(0, 10) as GameState['history'];
@@ -572,11 +590,11 @@ const App: React.FC = () => {
         const timer = window.setTimeout(() => setClutchPauseUntil(0), Math.max(0, clutchPauseUntil - Date.now())) as unknown as number;
         return () => window.clearTimeout(timer);
     }
-    if (gameState.autoFlipEnabled && hasAuto && !isFlipping && !hasWon && gameState.streak < currentGoal && !gameState.hardPushBust && !showMomModal.show) {
+    if (gameState.autoFlipEnabled && hasAuto && !isFlipping && !hasWon && gameState.streak < currentGoal && !gameState.hardPushBust && !showMomModal.show && !hardDialogOpen) {
         const timer = window.setTimeout(() => handleFlip(false, true), 100) as unknown as number;
         return () => window.clearTimeout(timer);
     }
-  }, [gameState.autoFlipEnabled, isFlipping, hasWon, gameState.streak, gameState.hardPushBust, currentGoal, gameState.upgrades, handleFlip, showMomModal, isClutchPaused, clutchPauseUntil]);
+  }, [gameState.autoFlipEnabled, isFlipping, hasWon, gameState.streak, gameState.hardPushBust, currentGoal, gameState.upgrades, handleFlip, showMomModal, isClutchPaused, clutchPauseUntil, hardDialogOpen]);
 
   // Auto Buy (keyed on the unlock only, so purchases and flips don't keep restarting the 1s interval)
   useEffect(() => {
@@ -611,7 +629,7 @@ const App: React.FC = () => {
                 // Wards come last: only top up once the regular upgrades are handled
                 const wardsBought = prev.upgrades[UpgradeType.HARD_WARD] || 0;
                 const wardCost = getWardPrice(newState.upgrades, prev.prestigeLevel);
-                if (prev.isHardMode && wardCost !== undefined && newState.wardsHeld < getWardCap(prev.upgrades) && newState.money >= wardCost) {
+                if (prev.isHardMode && prev.hardPushLevel === 0 && wardCost !== undefined && newState.wardsHeld < getWardCap(prev.upgrades) && newState.money >= wardCost) {
                     newState.money -= wardCost;
                     newState.upgrades[UpgradeType.HARD_WARD] = wardsBought + 1;
                     newState.wardsHeld += 1;
@@ -656,17 +674,24 @@ const App: React.FC = () => {
           }
 
           const level = prev.upgrades[id] || 0;
-          // Void Injection charges and Abyss upgrades have hard limits (no Limitless tiers)
-          if (id === UpgradeType.HARD_MODE_BUFF && level >= UPGRADES[id].maxLevel) return prev;
+          // Void Injection charges and Abyss upgrades have hard limits (no Limitless tiers).
+          // Their prices are read from the current state so two quick clicks can't both pay the old price.
+          if (id === UpgradeType.HARD_MODE_BUFF) {
+              const price = UPGRADES[id].costTiers[level];
+              if (price === undefined || prev.voidFragments < price) return prev;
+              return { ...prev, voidFragments: prev.voidFragments - price, upgrades: { ...prev.upgrades, [id]: level + 1 } };
+          }
 
           if (UPGRADES[id].currency === 'resolve') {
-              if (prev.resolve < cost || level >= UPGRADES[id].maxLevel) return prev;
-              return { ...prev, resolve: prev.resolve - cost, upgrades: { ...prev.upgrades, [id]: level + 1 } };
+              const price = UPGRADES[id].costTiers[level];
+              if (price === undefined || prev.resolve < price) return prev;
+              return { ...prev, resolve: prev.resolve - price, upgrades: { ...prev.upgrades, [id]: level + 1 } };
           }
 
           if (id === UpgradeType.HARD_WARD) {
-              if (prev.money < cost || prev.wardsHeld >= getWardCap(prev.upgrades)) return prev;
-              return { ...prev, money: prev.money - cost, wardsHeld: prev.wardsHeld + 1, upgrades: { ...prev.upgrades, [id]: level + 1 } };
+              const price = getWardPrice(prev.upgrades, prev.prestigeLevel);
+              if (price === undefined || prev.money < price || prev.wardsHeld >= getWardCap(prev.upgrades)) return prev;
+              return { ...prev, money: prev.money - price, wardsHeld: prev.wardsHeld + 1, upgrades: { ...prev.upgrades, [id]: level + 1 } };
           }
 
           if (isPrestige && id !== UpgradeType.PRESTIGE_GOLD_DIGGER) {
@@ -828,59 +853,80 @@ const App: React.FC = () => {
       return (map[key] || key) + suffix;
   };
 
+  const injectionCost = UPGRADES[UpgradeType.HARD_MODE_BUFF].costTiers[0];
+  const buyInjectionCharge = () => handleBuy(UpgradeType.HARD_MODE_BUFF, injectionCost, true);
+
   const renderGauntletHud = () => {
       const heatCap = getHeatCap(gameState.upgrades);
       const wardCap = getWardCap(gameState.upgrades);
       const charges = gameState.upgrades[UpgradeType.HARD_MODE_BUFF] || 0;
       const baseShown = Math.min(HARD_BASE_CAP, getBaseChance(gameState.upgrades));
+      const isPushing = gameState.hardPushLevel > 0;
+      const injecting = gameState.injectionFlipsLeft > 0;
+      const canBuyCharge = !injecting && charges === 0 && gameState.voidFragments >= injectionCost;
       return (
           <div data-no-flip className="mt-2 w-[280px] flex flex-col items-center gap-2 font-mono">
-              <div className="text-[10px] text-red-400/90 tracking-wider">
-                  {Math.round(baseShown * 100)}% BASE + <span className="text-orange-400">{gameState.hardHeat}% HEAT</span>
-                  {gameState.injectionFlipsLeft > 0 && <span className="text-red-400"> + {Math.round(INJECTION_BOOST * 100)}% INJ</span>}
-                  <span className="text-noir-600"> • MAX {Math.round(HARD_CHANCE_CEILING * 100)}%</span>
+              <div className="flex items-center gap-2 text-[10px] text-red-400/90 tracking-wider">
+                  <span>
+                      {Math.round(baseShown * 100)}% BASE + <span className="text-orange-400">{gameState.hardHeat}/{heatCap}% HEAT</span>
+                      {injecting && <span className="text-red-400"> + {Math.round(INJECTION_BOOST * 100)}% INJ</span>}
+                  </span>
+                  <button onClick={() => setShowHardRules(true)} className="text-noir-500 hover:text-white cursor-pointer" title="How hard mode works"><HelpCircle size={12} /></button>
               </div>
               <div className="w-full h-1.5 bg-noir-900 border border-noir-800 rounded-full overflow-hidden" title={`Heat ${gameState.hardHeat}/${heatCap}%`}>
                   <div className="h-full bg-gradient-to-r from-orange-600 to-red-500 transition-all duration-150" style={{ width: `${(gameState.hardHeat / heatCap) * 100}%` }} />
               </div>
               <div className={`text-[10px] font-bold tracking-widest ${inClutchZone ? 'text-red-400 animate-pulse' : 'text-noir-600'}`}>
-                  {gameState.hardPushLevel > 0
+                  {isPushing
                       ? `PUSH x${getPushMultiplier(gameState.hardPushLevel, false)} • NO WARDS • ${currentGoal - gameState.streak} TO GO`
                       : inClutchZone ? `CLUTCH ZONE • ${currentGoal - gameState.streak} TO GO` : `CLUTCH ZONE AT ${clutchZoneStart}`}
               </div>
               <div className="flex items-center justify-between w-full gap-2">
-                  <div className="flex items-center gap-1" title="Wards absorb a Tails in the clutch zone">
+                  <div className={`flex items-center gap-1 ${isPushing ? 'opacity-30' : ''}`} title={isPushing ? 'Wards do not work during a Push' : 'Wards absorb a Tails in the clutch zone'}>
                       {Array.from({ length: wardCap }).map((_, i) => (
                           <Shield key={i} size={16} className={i < gameState.wardsHeld ? 'text-sky-400 fill-sky-400/30' : 'text-noir-700'} />
                       ))}
                   </div>
                   <div className="flex items-center gap-1">
-                      <button onClick={fireInjection} disabled={!canInject(gameState)} className={`flex items-center gap-1 px-2 py-1 text-[10px] font-bold border transition-colors ${gameState.injectionFlipsLeft > 0 ? 'border-red-500 text-red-300 bg-red-950/50 animate-pulse' : canInject(gameState) ? 'border-red-700 text-red-300 hover:bg-red-950/50 cursor-pointer' : 'border-noir-800 text-noir-600 cursor-not-allowed'}`} title={`Void Injection: +${Math.round(INJECTION_BOOST * 100)}% for ${INJECTION_FLIPS} flips, past the cap`}>
-                          <Syringe size={12} /> {gameState.injectionFlipsLeft > 0 ? `${gameState.injectionFlipsLeft} LEFT` : `INJECT ${charges}`}
-                      </button>
-                      <button onClick={toggleAutoInject} className={`px-2 py-1 text-[10px] font-bold border transition-colors cursor-pointer ${gameState.autoInjectEnabled ? 'border-red-700 text-red-300 bg-red-950/30' : 'border-noir-700 text-noir-500 hover:text-white'}`} title="Auto-inject on clutch zone entry and after a Ward breaks">
-                          AUTO {gameState.autoInjectEnabled ? 'ON' : 'OFF'}
+                      {canBuyCharge ? (
+                          <button onClick={buyInjectionCharge} className="flex items-center gap-1 px-2 py-1 text-[10px] font-bold border border-purple-600 text-purple-200 hover:bg-purple-950/50 cursor-pointer" title="Buy a Void Injection charge">
+                              <Syringe size={12} /> BUY · {injectionCost} VF
+                          </button>
+                      ) : (
+                          <button onClick={fireInjection} disabled={!canInject(gameState)} className={`flex items-center gap-1 px-2 py-1 text-[10px] font-bold border transition-colors ${injecting ? 'border-red-500 text-red-300 bg-red-950/50 animate-pulse' : canInject(gameState) ? 'border-red-700 text-red-300 hover:bg-red-950/50 cursor-pointer' : 'border-noir-800 text-noir-600 cursor-not-allowed'}`} title={`Void Injection: +${Math.round(INJECTION_BOOST * 100)}% for ${INJECTION_FLIPS} flips, past the cap. Usable in the Clutch Zone and during a Push.`}>
+                              <Syringe size={12} /> {injecting ? `${gameState.injectionFlipsLeft} LEFT` : charges === 0 ? 'NO CHARGES' : canInject(gameState) ? `INJECT (${charges})` : `(${charges}) ZONE ONLY`}
+                          </button>
+                      )}
+                      <button onClick={toggleAutoInject} className={`px-2 py-1 text-[10px] font-bold border transition-colors cursor-pointer ${gameState.autoInjectEnabled ? 'border-red-700 text-red-300 bg-red-950/30' : 'border-noir-700 text-noir-500 hover:text-white'}`} title="Auto-inject on clutch zone entry, after a Ward breaks, and when a Push starts">
+                          AUTO-INJECT {gameState.autoInjectEnabled ? 'ON' : 'OFF'}
                       </button>
                   </div>
               </div>
-              {isClutchPaused && (
-                  <div className="w-full flex items-center justify-between gap-2 border border-red-600 bg-red-950/60 px-3 py-2 animate-pop-in-up">
-                      <span className="text-[10px] font-bold text-red-200 tracking-widest">CLUTCH! INJECT NOW?</span>
-                      <div className="flex gap-1">
-                          <button onClick={fireInjection} className="px-2 py-1 text-[10px] font-bold border border-red-400 text-white hover:bg-red-800 cursor-pointer">INJECT</button>
-                          <button onClick={() => setClutchPauseUntil(0)} className="px-2 py-1 text-[10px] font-bold border border-noir-600 text-noir-300 hover:text-white cursor-pointer">SAVE IT</button>
-                      </div>
-                  </div>
-              )}
           </div>
       );
   };
+
+  // Shared by the hard mode prompt and the in-game rules modal
+  const renderHardModeRules = () => (
+      <ul className="text-left text-sm font-mono text-noir-400 space-y-2 bg-black/50 p-4 border border-noir-800">
+          <li className="flex items-start gap-2"><span className="text-red-500">-</span> Upgrades cap at {Math.round(HARD_BASE_CAP * 100)}% probability</li>
+          <li className="flex items-start gap-2"><span className="text-red-500">-</span> Win Streak Requirement: {getHardGoal(gameState.stats.hardModeWins)} (+{HARD_GOAL_STEP} per Hard Win)</li>
+          <li className="flex items-start gap-2"><span className="text-green-500">+</span> Heat: each Heads in a row adds +{HEAT_PER_HEADS}% (up to +{getHeatCap(gameState.upgrades)}%). A Tails wipes it.</li>
+          <li className="flex items-start gap-2"><span className="text-green-500">+</span> Clutch Zone = the last {CLUTCH_ZONE} Heads. Wards ($) each save one Tails there, but not during a Push.</li>
+          <li className="flex items-start gap-2"><span className="text-green-500">+</span> Void Injection ({injectionCost} VF a charge): +{Math.round(INJECTION_BOOST * 100)}% for {INJECTION_FLIPS} flips, past the cap. Usable in the Clutch Zone and during a Push. Nothing goes above {Math.round(HARD_CHANCE_CEILING * 100)}%.</li>
+          <li className="flex items-start gap-2"><span className="text-green-500">+</span> At the goal: Bank the win, or Push {PUSH_STEP} more Heads for double rewards. A bust pays no Resolve.</li>
+          <li className="flex items-start gap-2"><span className="text-green-500">+</span> Every 10-streak pays VF. Hard wins pay Resolve, which buys permanent upgrades in The Abyss.</li>
+          <li className="flex items-start gap-2"><span className="text-green-500">+</span> Permanent 10x Cash Multiplier</li>
+      </ul>
+  );
 
   // Hard mode win screen: what banking pays now vs. what a push risks
   const bankedGoal = gameState.hardPushBust ? currentGoal - PUSH_STEP : currentGoal;
   const hardRewards = getHardWinRewards(gameState.stats.hardModeWins, gameState.hardPushLevel, gameState.hardPushBust);
   const canPush = hasWon && gameState.isHardMode && !gameState.hardPushBust && gameState.hardPushLevel < MAX_PUSHES;
   const pushOdds = canPush ? getPushSuccessChance(gameState) : 0;
+  // With auto-inject off the player can still inject by hand once the Push starts
+  const pushOddsIfInjected = canPush && !gameState.autoInjectEnabled ? getPushSuccessChance(gameState, true) : pushOdds;
   const pushRewards = getHardWinRewards(gameState.stats.hardModeWins, gameState.hardPushLevel + 1, false);
   const bustRewards = getHardWinRewards(gameState.stats.hardModeWins, gameState.hardPushLevel + 1, true);
 
@@ -891,6 +937,7 @@ const App: React.FC = () => {
     showMomModal.show ||
     showHardModePrompt ||
     showRetreatConfirm ||
+    showHardRules ||
     showTitleSelector;
 
   return (
@@ -898,7 +945,7 @@ const App: React.FC = () => {
       
       <div className="bg-noise pointer-events-none fixed inset-0 z-0" />
       <div className="bg-vignette pointer-events-none fixed inset-0 z-0" />
-      <ConfettiSystem streak={gameState.streak} isRichMode={gameState.money > 1e6 && gameState.activeTitle === 'RICH'} activeTitle={gameState.activeTitle} momPurchases={gameState.stats.momPurchases} partyPooperEnabled={gameState.partyPooperEnabled} />
+      <ConfettiSystem streak={gameState.streak} isRichMode={gameState.money > 1e6 && gameState.activeTitle === 'RICH'} activeTitle={gameState.activeTitle} momPurchases={gameState.stats.momPurchases} partyPooperEnabled={gameState.partyPooperEnabled} maxBurst={gameState.isHardMode ? HARD_CONFETTI_BURST : undefined} />
 
       {/* Party Pooper dark overlay */}
       {gameState.partyPooperEnabled && (gameState.upgrades[UpgradeType.PRESTIGE_PARTY_POOPER] || 0) > 0 && (
@@ -952,19 +999,35 @@ const App: React.FC = () => {
                       <br/><br/>
                       <span className="text-red-400 font-bold block">HARD MODE AVAILABLE</span>
                   </p>
-                  <ul className="text-left text-sm font-mono text-noir-400 space-y-2 mb-4 bg-black/50 p-4 border border-noir-800">
-                      <li className="flex items-start gap-2"><span className="text-red-500">-</span> Upgrades cap at {HARD_BASE_CAP * 100}% probability</li>
-                      <li className="flex items-start gap-2"><span className="text-red-500">-</span> Win Streak Requirement: {getHardGoal(gameState.stats.hardModeWins)} (+{HARD_GOAL_STEP} per Hard Win)</li>
-                      <li className="flex items-start gap-2"><span className="text-green-500">+</span> Heat: every Heads in a row adds +{HEAT_PER_HEADS}% (up to {HARD_CHANCE_CEILING * 100}% total)</li>
-                      <li className="flex items-start gap-2"><span className="text-green-500">+</span> Wards ($) save your streak in the last {CLUTCH_ZONE} Heads (not while pushing)</li>
-                      <li className="flex items-start gap-2"><span className="text-green-500">+</span> Void Injection: +{Math.round(INJECTION_BOOST * 100)}% for {INJECTION_FLIPS} flips, past the cap</li>
-                      <li className="flex items-start gap-2"><span className="text-green-500">+</span> Bank the win or Push for double rewards &amp; Resolve</li>
-                      <li className="flex items-start gap-2"><span className="text-green-500">+</span> Permanent 10x Cash Multiplier</li>
-                  </ul>
+                  <div className="mb-4">{renderHardModeRules()}</div>
                   <p className="text-[10px] text-noir-500 font-mono uppercase tracking-widest mb-6">{hasWon ? 'Ascends into Hard Mode' : 'Restarts this run without rewards'} • Retreat anytime from the skull</p>
                   <div className="flex gap-4">
                       <button onClick={closeHardModePrompt} className="flex-1 py-3 border border-noir-700 text-noir-500 hover:bg-noir-900 hover:text-white transition-colors font-mono">DECLINE</button>
                       <button onClick={enableHardMode} className="flex-1 py-3 bg-red-900/50 border border-red-600 text-red-100 hover:bg-red-800 transition-colors font-mono font-bold tracking-widest shadow-[0_0_15px_rgba(220,38,38,0.4)]">{hasWon ? 'ENABLE & ASCEND' : 'ENABLE & RESTART'}</button>
+                  </div>
+              </div>
+          </div>
+      )}
+
+      {/* ── Hard mode rules (from the ? in the HUD) ─────────────────────────── */}
+      {showHardRules && (
+          <div data-no-flip className="fixed inset-0 z-[200] flex items-center justify-center bg-black/90 backdrop-blur-md p-6 animate-fade-in" onClick={() => setShowHardRules(false)}>
+              <div className="max-w-lg w-full bg-noir-950 border border-red-900 p-6 md:p-8" onClick={e => e.stopPropagation()}>
+                  <h2 className="text-2xl font-mono font-bold text-white mb-4 flex items-center gap-2"><Skull size={22} className="text-red-500" /> THE GAUNTLET</h2>
+                  {renderHardModeRules()}
+                  <button onClick={() => setShowHardRules(false)} className="mt-6 w-full py-3 border border-noir-700 text-noir-300 hover:bg-noir-900 hover:text-white transition-colors font-mono">GOT IT</button>
+              </div>
+          </div>
+      )}
+
+      {/* ── Clutch pause: fixed so it is on screen on phones too ──────────────── */}
+      {isClutchPaused && gameState.isHardMode && !hasWon && (
+          <div data-no-flip className="fixed inset-x-0 bottom-24 z-[95] flex justify-center px-4 pointer-events-none">
+              <div className="pointer-events-auto w-full max-w-[380px] flex items-center justify-between gap-3 border border-red-600 bg-red-950/95 px-4 py-3 shadow-[0_0_30px_rgba(220,38,38,0.4)] animate-pop-in-up font-mono">
+                  <span className="text-xs font-bold text-red-100 tracking-wider">CLUTCH ZONE! INJECT NOW?</span>
+                  <div className="flex gap-2 shrink-0">
+                      <button onClick={fireInjection} className="px-3 py-2 text-xs font-bold border border-red-400 text-white bg-red-800/60 hover:bg-red-700 cursor-pointer">INJECT</button>
+                      <button onClick={() => setClutchPauseUntil(0)} className="px-3 py-2 text-xs font-bold border border-noir-500 text-noir-200 hover:text-white cursor-pointer">SAVE CHARGE</button>
                   </div>
               </div>
           </div>
@@ -993,10 +1056,12 @@ const App: React.FC = () => {
         <div className={`pointer-events-none fixed inset-0 z-[90] flex items-center justify-center flex-col overflow-hidden`}>
             {celebration.level >= 5 && !gameState.partyPooperEnabled && <div className="absolute inset-0 bg-white/20 animate-flash mix-blend-overlay"></div>}
             <div className={`${celebration.level >= 8 ? 'animate-shake' : ''} flex flex-col items-center justify-center px-4`}>
-                <h2 key={celebration.id} className={`font-mono font-bold drop-shadow-[0_0_15px_rgba(251,191,36,0.6)] text-center transition-transform duration-300 max-w-[90vw] break-words leading-tight ${celebration.level >= 9 ? 'text-7xl md:text-9xl text-amber-500 animate-scale-slam' : celebration.level >= 5 ? 'text-6xl md:text-8xl text-amber-400 animate-pop-up' : 'text-4xl md:text-6xl text-amber-200/80 animate-pop-in-up'}`}>
+                <h2 key={celebration.id} className={`font-mono font-bold text-center transition-transform duration-300 max-w-[90vw] break-words leading-tight ${celebration.tone
+                    ? `text-5xl md:text-7xl animate-pop-up ${celebration.tone === 'ward' ? 'text-sky-300 drop-shadow-[0_0_15px_rgba(56,189,248,0.7)]' : 'text-red-500 drop-shadow-[0_0_15px_rgba(239,68,68,0.7)]'}`
+                    : `drop-shadow-[0_0_15px_rgba(251,191,36,0.6)] ${celebration.level >= 9 ? 'text-7xl md:text-9xl text-amber-500 animate-scale-slam' : celebration.level >= 5 ? 'text-6xl md:text-8xl text-amber-400 animate-pop-up' : 'text-4xl md:text-6xl text-amber-200/80 animate-pop-in-up'}`}`}>
                     {celebration.text}
                 </h2>
-                <div className={`mt-2 md:mt-4 font-mono font-bold tracking-[0.5em] md:tracking-[1em] text-white/90 uppercase ${celebration.level >= 7 ? 'text-2xl animate-pulse' : 'text-sm'}`}>{celebration.level}x STREAK</div>
+                <div className={`mt-2 md:mt-4 font-mono font-bold text-white/90 uppercase text-center ${celebration.tone ? 'tracking-[0.3em] text-sm md:text-lg' : `tracking-[0.5em] md:tracking-[1em] ${celebration.level >= 7 ? 'text-2xl animate-pulse' : 'text-sm'}`}`}>{celebration.sub ?? `${celebration.level}x STREAK`}</div>
             </div>
         </div>
       )}
@@ -1043,7 +1108,9 @@ const App: React.FC = () => {
             {hasWon ? (
                 <div className="text-center animate-fade-in space-y-6 bg-noir-900/90 p-12 border-2 border-amber-500/30 rounded-xl backdrop-blur-md shadow-[0_0_50px_rgba(0,0,0,0.8)] relative overflow-hidden group max-w-lg mx-4">
                     <div className="absolute inset-0 bg-gradient-to-t from-purple-900/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-1000"></div>
-                    <Trophy className="w-24 h-24 text-amber-500 mx-auto mb-4 drop-shadow-[0_0_20px_rgba(245,158,11,0.6)] animate-bounce" />
+                    {gameState.hardPushBust
+                        ? <Skull className="w-24 h-24 text-red-500 mx-auto mb-4 drop-shadow-[0_0_20px_rgba(239,68,68,0.6)]" />
+                        : <Trophy className="w-24 h-24 text-amber-500 mx-auto mb-4 drop-shadow-[0_0_20px_rgba(245,158,11,0.6)] animate-bounce" />}
                     <h2 className={`text-5xl font-mono font-bold tracking-tight ${gameState.hardPushBust ? 'text-red-400' : 'text-white'}`}>{gameState.hardPushBust ? 'BUSTED.' : 'IMPOSSIBLE.'}</h2>
                     <div className="text-noir-300 font-mono leading-relaxed space-y-2">
                         <p>{gameState.hardPushBust ? 'Greed broke the streak. The win still counts.' : 'You defied the probability.'}</p>
@@ -1065,15 +1132,15 @@ const App: React.FC = () => {
                             {canPush && (
                                 <button onClick={pushOnward} className="w-full px-6 py-3 bg-red-950/60 border border-red-600 text-red-100 font-mono font-bold tracking-widest hover:bg-red-900/70 transition-all duration-300 flex flex-col items-center gap-1">
                                     <span className="flex items-center gap-2"><Flame size={18} /> PUSH: +{PUSH_STEP} HEADS FOR x{getPushMultiplier(gameState.hardPushLevel + 1, false)}</span>
-                                    <span className="text-[10px] font-normal tracking-wider text-red-300/80">{(pushOdds * 100).toFixed(0)}% odds • win {pushRewards.voidFragments} VF + {pushRewards.resolve} Resolve • bust {bustRewards.voidFragments} VF + {bustRewards.resolve} Resolve</span>
+                                    <span className="text-xs font-normal tracking-wide text-red-200">{(pushOdds * 100).toFixed(0)}% odds{pushOddsIfInjected > pushOdds ? ` (${(pushOddsIfInjected * 100).toFixed(0)}% if you inject)` : ''} • win {pushRewards.voidFragments} VF + {pushRewards.resolve} Resolve • bust {bustRewards.voidFragments} VF + {bustRewards.resolve} Resolve</span>
                                 </button>
                             )}
-                            <button onClick={() => ascend(ascendToHard)} className="w-full px-8 py-4 bg-purple-600 text-white font-mono font-bold tracking-widest hover:bg-purple-500 transition-all duration-300 shadow-lg hover:shadow-purple-500/40 transform hover:-translate-y-1 flex items-center justify-center gap-3"><Sparkles size={20} /> {canPush ? 'BANK & ASCEND' : 'ASCEND'}</button>
-                            <div className="flex items-center justify-center gap-2 text-[10px] font-mono uppercase tracking-widest">
+                            <div className="flex items-center justify-center gap-2 text-xs font-mono uppercase tracking-wider">
                                 <span className="text-noir-500">Next run:</span>
-                                <button onClick={() => setAscendToHard(true)} className={`px-2 py-1 border ${ascendToHard ? 'border-red-500 text-red-300 bg-red-950/40' : 'border-noir-700 text-noir-500 hover:text-white'}`}>Hard (goal {getHardGoal(gameState.stats.hardModeWins + 1)})</button>
-                                <button onClick={() => setAscendToHard(false)} className={`px-2 py-1 border ${!ascendToHard ? 'border-amber-500 text-amber-300 bg-amber-950/40' : 'border-noir-700 text-noir-500 hover:text-white'}`}>Normal</button>
+                                <button onClick={() => setAscendToHard(true)} className={`px-3 py-2 border cursor-pointer ${ascendToHard ? 'border-red-500 text-red-300 bg-red-950/40' : 'border-noir-700 text-noir-500 hover:text-white'}`}>Hard (goal {getHardGoal(gameState.stats.hardModeWins + 1)})</button>
+                                <button onClick={() => setAscendToHard(false)} className={`px-3 py-2 border cursor-pointer ${!ascendToHard ? 'border-amber-500 text-amber-300 bg-amber-950/40' : 'border-noir-700 text-noir-500 hover:text-white'}`}>Normal</button>
                             </div>
+                            <button onClick={() => ascend(ascendToHard)} className="w-full px-8 py-4 bg-purple-600 text-white font-mono font-bold tracking-widest hover:bg-purple-500 transition-all duration-300 shadow-lg hover:shadow-purple-500/40 transform hover:-translate-y-1 flex items-center justify-center gap-3"><Sparkles size={20} /> {canPush ? 'BANK & ASCEND' : 'ASCEND'} → {ascendToHard ? 'HARD' : 'NORMAL'}</button>
                         </div>
                     ) : (
                         <div className="flex flex-col gap-3 pt-4 relative z-50">
@@ -1083,7 +1150,7 @@ const App: React.FC = () => {
                     )}
                 </div>
             ) : (
-                <div className="flex flex-col items-center gap-16 w-full max-w-md z-10">
+                <div className={`flex flex-col items-center w-full max-w-md z-10 ${gameState.isHardMode ? 'gap-8 md:gap-16' : 'gap-16'}`}>
                     <div className="relative w-64 h-64 perspective-1000 flex items-center justify-center">
                         <div className="absolute bottom-10 w-32 h-4 bg-black/40 blur-xl rounded-[100%]" style={{ animation: isFlipping ? `shadowScale ${Math.max(1, UPGRADES[UpgradeType.SPEED].getEffect(gameState.upgrades[UpgradeType.SPEED]) - (UPGRADES[UpgradeType.PRESTIGE_FLUX].getEffect(gameState.upgrades[UpgradeType.PRESTIGE_FLUX] || 0) * 250))}ms cubic-bezier(0.5, 0, 0.5, 1) forwards` : 'none' }}></div>
                         <div className="w-48 h-48 relative preserve-3d" style={{ animation: isFlipping ? `tossHeight ${Math.max(1, UPGRADES[UpgradeType.SPEED].getEffect(gameState.upgrades[UpgradeType.SPEED]) - (UPGRADES[UpgradeType.PRESTIGE_FLUX].getEffect(gameState.upgrades[UpgradeType.PRESTIGE_FLUX] || 0) * 250))}ms cubic-bezier(0.5, 0, 0.5, 1) forwards` : 'none' }}>
@@ -1098,8 +1165,8 @@ const App: React.FC = () => {
                         <button onClick={() => handleFlip(false)} disabled={isFlipping} className={`group relative w-full max-w-[240px] py-5 text-xl font-mono font-bold tracking-[0.2em] border transition-all duration-200 overflow-hidden z-20 cursor-pointer ${isFlipping ? 'border-noir-800 text-noir-700 bg-black cursor-not-allowed scale-95' : 'border-white text-white bg-transparent hover:bg-white hover:text-black hover:shadow-[0_0_30px_rgba(255,255,255,0.2)] active:scale-95'}`}><span className="relative z-10">{isFlipping ? 'FLIPPING...' : 'FLIP COIN'}</span></button>
                         <div className="flex flex-col items-center gap-1">
                              <div className="text-[10px] uppercase tracking-widest text-noir-500">Probability</div>
-                             <div className="font-mono text-amber-500 text-lg font-bold flex items-center gap-2">{(currentChance * 100).toFixed(0)}%{gameState.injectionFlipsLeft > 0 && <Syringe size={14} className="text-red-500 animate-pulse" />}</div>
-                             {(gameState.upgrades[UpgradeType.PRESTIGE_FATE] || 0) > 0 && <div className="text-[10px] text-purple-400 font-mono">(+{((gameState.upgrades[UpgradeType.PRESTIGE_FATE] || 0) * 2.5).toFixed(0)}% Base)</div>}
+                             <div className="font-mono text-amber-500 text-lg font-bold flex items-center gap-2">{(currentChance * 100).toFixed(0)}%{gameState.injectionFlipsLeft > 0 && <Syringe size={14} className="text-red-500 animate-pulse" />}{gameState.isHardMode && currentChance >= HARD_CHANCE_CEILING && <span className="text-[10px] text-red-400 border border-red-800 px-1" title="The hard mode ceiling">MAX</span>}</div>
+                             {!gameState.isHardMode && (gameState.upgrades[UpgradeType.PRESTIGE_FATE] || 0) > 0 && <div className="text-[10px] text-purple-400 font-mono">(+{((gameState.upgrades[UpgradeType.PRESTIGE_FATE] || 0) * 2.5).toFixed(0)}% Base)</div>}
                              {gameState.isHardMode && renderGauntletHud()}
                         </div>
                     </div>
@@ -1116,7 +1183,7 @@ const App: React.FC = () => {
             </div>
             
             <div className="flex gap-4">
-                 {gameState.isHardMode ? (
+                 {gameState.isHardMode ? !hasWon && (
                     <button onClick={() => setShowRetreatConfirm(true)} className="p-2 text-red-500 hover:text-white transition-colors hover:bg-red-950 rounded-full cursor-pointer" title="Retreat from Hard Mode">
                         <Skull size={20} />
                     </button>
