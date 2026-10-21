@@ -312,10 +312,10 @@ export const UPGRADES: Record<UpgradeType, UpgradeConfig> = {
   [UpgradeType.HARD_WARD]: {
     id: UpgradeType.HARD_WARD,
     name: "Ward",
-    description: "Absorbs one Tails in the clutch zone. Your streak survives, your Heat doesn't.",
-    baseCost: 1000000,
-    // Price climbs with every Ward bought this run
-    costTiers: [1e6, 1e8, 1e10, 1e12, 1e14, 1e16, 1e18, 1e20],
+    description: "Absorbs one Tails in the clutch zone (not during a Push). Your streak survives, your Heat doesn't.",
+    baseCost: 2.5e18,
+    // Price doubles with every Ward bought this run, scaled by income multipliers (see getWardPrice)
+    costTiers: [2.5e18, 5e18, 1e19, 2e19, 4e19, 8e19, 1.6e20, 3.2e20],
     maxLevel: 8,
     getEffect: (level) => level,
     formatEffect: (val) => `${val} Bought`,
@@ -358,4 +358,13 @@ export const UPGRADES: Record<UpgradeType, UpgradeConfig> = {
     getEffect: (level) => level,
     formatEffect: (val) => val > 0 ? "HALF HEAT" : "HEAT LOST",
   },
+};
+
+// Wards are priced against the permanent income multipliers so they stay a real purchase for big earners
+export const getWardPrice = (upgrades: Record<UpgradeType, number>, prestigeLevel: number): number | undefined => {
+    const base = UPGRADES[UpgradeType.HARD_WARD].costTiers[upgrades[UpgradeType.HARD_WARD] || 0];
+    if (base === undefined) return undefined;
+    const goldDigger = UPGRADES[UpgradeType.PRESTIGE_GOLD_DIGGER].getEffect(upgrades[UpgradeType.PRESTIGE_GOLD_DIGGER] || 0);
+    const veteran = (upgrades[UpgradeType.PRESTIGE_VETERAN] || 0) > 0 ? Math.max(1, 1 + (prestigeLevel * 0.10)) : 1;
+    return base * goldDigger * veteran;
 };

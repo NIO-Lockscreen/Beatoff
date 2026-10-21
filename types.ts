@@ -104,7 +104,7 @@ export interface GameState {
 }
 
 export const WINNING_STREAK = 10;
-export const HARD_MODE_WINNING_STREAK = 25;
+export const HARD_MODE_WINNING_STREAK = 30;
 export const FRAGMENTS_PER_WIN = 5;
 
 // Leaderboard Types

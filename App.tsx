@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { GameState, UpgradeType, FRAGMENTS_PER_WIN, PlayerStats, GlobalLeaderboard, LeaderboardEntry } from './types';
-import { UPGRADES } from './constants';
+import { UPGRADES, getWardPrice } from './constants';
 import {
   getGoal, getHardGoal, getChance, getBaseChance, getClutchZoneStart, isInClutchZone, getHeatCap, getWardCap, getHardWinRewards, getPushMultiplier,
-  getPushSuccessChance, inject, canInject, shouldAutoInject, HEAT_PER_HEADS, HARD_BASE_CAP, HARD_CHANCE_CEILING, CLUTCH_ZONE,
+  getPushSuccessChance, inject, canInject, canWardAbsorb, shouldAutoInject, shouldAutoInjectOnPush, HEAT_PER_HEADS, HARD_BASE_CAP, HARD_CHANCE_CEILING, CLUTCH_ZONE,
   INJECTION_BOOST, INJECTION_FLIPS, MAX_PUSHES, PUSH_STEP, CLUTCH_PAUSE_MS, RESOLVE_PER_TEN_STREAK, HARD_GOAL_STEP,
 } from './hardMode';
 import Shop from './components/Shop';
@@ -376,7 +376,7 @@ const App: React.FC = () => {
       setGameState(p => {
           if (!p.isHardMode || p.hardPushBust || p.hardPushLevel >= MAX_PUSHES) return p;
           const next = { ...p, hardPushLevel: p.hardPushLevel + 1 };
-          return shouldAutoInject(next) ? inject(next) : next;
+          return shouldAutoInjectOnPush(next) ? inject(next) : next;
       });
       setHasWon(false);
       setCelebration(null);
@@ -420,7 +420,7 @@ const App: React.FC = () => {
         setGameState(prev => {
             let newState = { ...prev, totalFlips: prev.totalFlips + 1, stats: { ...prev.stats } };
             const zoneStart = getClutchZoneStart(getGoal(prev));
-            const wardSave = !isHeads && prev.isHardMode && prev.wardsHeld > 0 && prev.streak >= zoneStart;
+            const wardSave = !isHeads && canWardAbsorb(prev);
             
             if (isAuto) newState.isPuristRun = false;
 
@@ -610,7 +610,7 @@ const App: React.FC = () => {
 
                 // Wards come last: only top up once the regular upgrades are handled
                 const wardsBought = prev.upgrades[UpgradeType.HARD_WARD] || 0;
-                const wardCost = UPGRADES[UpgradeType.HARD_WARD].costTiers[wardsBought];
+                const wardCost = getWardPrice(newState.upgrades, prev.prestigeLevel);
                 if (prev.isHardMode && wardCost !== undefined && newState.wardsHeld < getWardCap(prev.upgrades) && newState.money >= wardCost) {
                     newState.money -= wardCost;
                     newState.upgrades[UpgradeType.HARD_WARD] = wardsBought + 1;
@@ -844,7 +844,9 @@ const App: React.FC = () => {
                   <div className="h-full bg-gradient-to-r from-orange-600 to-red-500 transition-all duration-150" style={{ width: `${(gameState.hardHeat / heatCap) * 100}%` }} />
               </div>
               <div className={`text-[10px] font-bold tracking-widest ${inClutchZone ? 'text-red-400 animate-pulse' : 'text-noir-600'}`}>
-                  {inClutchZone ? `CLUTCH ZONE • ${currentGoal - gameState.streak} TO GO` : `CLUTCH ZONE AT ${clutchZoneStart}`}
+                  {gameState.hardPushLevel > 0
+                      ? `PUSH x${getPushMultiplier(gameState.hardPushLevel, false)} • NO WARDS • ${currentGoal - gameState.streak} TO GO`
+                      : inClutchZone ? `CLUTCH ZONE • ${currentGoal - gameState.streak} TO GO` : `CLUTCH ZONE AT ${clutchZoneStart}`}
               </div>
               <div className="flex items-center justify-between w-full gap-2">
                   <div className="flex items-center gap-1" title="Wards absorb a Tails in the clutch zone">
@@ -954,7 +956,7 @@ const App: React.FC = () => {
                       <li className="flex items-start gap-2"><span className="text-red-500">-</span> Upgrades cap at {HARD_BASE_CAP * 100}% probability</li>
                       <li className="flex items-start gap-2"><span className="text-red-500">-</span> Win Streak Requirement: {getHardGoal(gameState.stats.hardModeWins)} (+{HARD_GOAL_STEP} per Hard Win)</li>
                       <li className="flex items-start gap-2"><span className="text-green-500">+</span> Heat: every Heads in a row adds +{HEAT_PER_HEADS}% (up to {HARD_CHANCE_CEILING * 100}% total)</li>
-                      <li className="flex items-start gap-2"><span className="text-green-500">+</span> Wards ($) save your streak in the last {CLUTCH_ZONE} Heads</li>
+                      <li className="flex items-start gap-2"><span className="text-green-500">+</span> Wards ($) save your streak in the last {CLUTCH_ZONE} Heads (not while pushing)</li>
                       <li className="flex items-start gap-2"><span className="text-green-500">+</span> Void Injection: +{Math.round(INJECTION_BOOST * 100)}% for {INJECTION_FLIPS} flips, past the cap</li>
                       <li className="flex items-start gap-2"><span className="text-green-500">+</span> Bank the win or Push for double rewards &amp; Resolve</li>
                       <li className="flex items-start gap-2"><span className="text-green-500">+</span> Permanent 10x Cash Multiplier</li>

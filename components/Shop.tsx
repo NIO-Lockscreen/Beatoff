@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { UpgradeType, PlayerStats } from '../types';
-import { UPGRADES } from '../constants';
+import { UPGRADES, getWardPrice } from '../constants';
 import { getWardCap } from '../hardMode';
 import { Zap, TrendingUp, Clock, Coins, PlayCircle, ShieldCheck, Flame, Ghost, Sparkles, Hourglass, Infinity, Skull, Crown, Heart, Power, Gem, Bot, Package, Syringe, Medal, VolumeX, Shield, ShieldPlus, Gauge, Anchor } from 'lucide-react';
 
@@ -233,6 +233,8 @@ const Shop: React.FC<ShopProps> = ({
     // Exception for Gold Digger & Mom (Abyss prices are never clamped)
     if (upgrade.id === UpgradeType.PRESTIGE_GOLD_DIGGER) {
         cost = upgrade.costTiers[currentLevel] || upgrade.costTiers[upgrade.costTiers.length - 1];
+    } else if (isWard) {
+        cost = isMaxed ? 0 : (getWardPrice(upgrades, prestigeLevel) ?? 0);
     } else if (isPrestige && !isResolve && cost > 50) {
         cost = 50;
     }
