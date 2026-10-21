@@ -358,6 +358,18 @@ export const UPGRADES: Record<UpgradeType, UpgradeConfig> = {
     getEffect: (level) => level,
     formatEffect: (val) => val > 0 ? "HALF HEAT" : "HEAT LOST",
   },
+  [UpgradeType.HARD_HEAD_START]: {
+    id: UpgradeType.HARD_HEAD_START,
+    name: "Head Start",
+    description: "Heat never drops below this, even after a Tails. For Gauntlet veterans.",
+    baseCost: 500,
+    costTiers: [500, 1000, 2000],
+    maxLevel: 3,
+    isPrestige: true,
+    currency: 'resolve',
+    getEffect: (level) => level,
+    formatEffect: (val) => `${val}% Min Heat`,
+  },
 };
 
 // Wards are priced against the permanent income multipliers so they stay a real purchase for big earners

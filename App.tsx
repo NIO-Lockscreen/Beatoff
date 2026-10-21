@@ -3,9 +3,9 @@ import { GameState, UpgradeType, FRAGMENTS_PER_WIN, PlayerStats, GlobalLeaderboa
 import { UPGRADES, getWardPrice } from './constants';
 import {
   getGoal, getHardGoal, getChance, getBaseChance, getClutchZoneStart, isInClutchZone, getHeatCap, getWardCap, getHardWinRewards, getPushMultiplier,
-  getPushSuccessChance, inject, canInject, canWardAbsorb, shouldAutoInject, shouldAutoInjectOnPush, HEAT_PER_HEADS, HARD_BASE_CAP, HARD_CHANCE_CEILING, CLUTCH_ZONE,
+  getPushSuccessChance, inject, canInject, canWardAbsorb, shouldAutoInject, getHeatFloor, getClutchZoneSize, HEAT_PER_HEADS, HARD_BASE_CAP, HARD_CHANCE_CEILING,
   INJECTION_BOOST, INJECTION_FLIPS, MAX_PUSHES, PUSH_STEP, CLUTCH_PAUSE_MS, HARD_GOAL_STEP,
-  HARD_EVENT_HOLD_MS, HARD_CONFETTI_BURST,
+  HARD_EVENT_HOLD_MS, HARD_CONFETTI_BURST, AUTO_BANK_DELAY_MS,
 } from './hardMode';
 import Shop from './components/Shop';
 import ProbabilityModal from './components/ProbabilityModal';
@@ -52,7 +52,7 @@ const INITIAL_STATE: GameState = {
     [UpgradeType.PRESTIGE_MOM]: 0, [UpgradeType.PRESTIGE_CARE_PACKAGE]: 0, [UpgradeType.PRESTIGE_VETERAN]: 0,
     [UpgradeType.PRESTIGE_PARTY_POOPER]: 0,
     [UpgradeType.HARD_MODE_BUFF]: 0, [UpgradeType.HARD_WARD]: 0, [UpgradeType.HARD_BULWARK]: 0,
-    [UpgradeType.HARD_MOMENTUM]: 0, [UpgradeType.HARD_STEADY]: 0,
+    [UpgradeType.HARD_MOMENTUM]: 0, [UpgradeType.HARD_STEADY]: 0, [UpgradeType.HARD_HEAD_START]: 0,
   },
   history: [],
   prestigeLevel: 0,
@@ -68,6 +68,7 @@ const INITIAL_STATE: GameState = {
   hardPushLevel: 0,
   hardPushBust: false,
   autoInjectEnabled: true,
+  autoBankEnabled: false,
   seenUpgrades: [UpgradeType.CHANCE, UpgradeType.SPEED, UpgradeType.COMBO, UpgradeType.VALUE], 
   playerName: null,
   stats: INITIAL_STATS,
@@ -179,6 +180,7 @@ const App: React.FC = () => {
         if (typeof loaded.hardPushLevel === 'undefined') loaded.hardPushLevel = 0;
         if (typeof loaded.hardPushBust === 'undefined') loaded.hardPushBust = false;
         if (typeof loaded.autoInjectEnabled === 'undefined') loaded.autoInjectEnabled = true;
+        if (typeof loaded.autoBankEnabled === 'undefined') loaded.autoBankEnabled = false;
         
         if (!loaded.seenUpgrades) {
             loaded.seenUpgrades = [UpgradeType.CHANCE, UpgradeType.SPEED, UpgradeType.COMBO, UpgradeType.VALUE];
@@ -298,6 +300,8 @@ const App: React.FC = () => {
           autoBuyEnabled: prev.autoBuyEnabled,
           partyPooperEnabled: prev.partyPooperEnabled,
           autoInjectEnabled: prev.autoInjectEnabled,
+          autoBankEnabled: prev.autoBankEnabled,
+          hardHeat: getHeatFloor(keptUpgrades),
           isHardMode: prev.isHardMode,
           ...overrides,
       };
@@ -392,7 +396,7 @@ const App: React.FC = () => {
       setGameState(p => {
           if (!p.isHardMode || p.hardPushBust || p.hardPushLevel >= MAX_PUSHES || p.streak < getGoal(p)) return p;
           const next = { ...p, hardPushLevel: p.hardPushLevel + 1 };
-          return shouldAutoInjectOnPush(next) ? inject(next) : next;
+          return shouldAutoInject(next) ? inject(next) : next;
       });
       setHasWon(false);
       setCelebration(null);
@@ -407,6 +411,17 @@ const App: React.FC = () => {
   };
 
   const toggleAutoInject = () => setGameState(p => ({ ...p, autoInjectEnabled: !p.autoInjectEnabled }));
+  const toggleAutoBank = () => setGameState(p => ({ ...p, autoBankEnabled: !p.autoBankEnabled }));
+
+  // Auto-bank: idle players shouldn't lose time sitting on the win screen. A ref keeps the
+  // latest ascend/next-run choice so the timer doesn't act on a stale closure.
+  const autoBankRef = useRef(() => {});
+  autoBankRef.current = () => ascend(ascendToHard);
+  useEffect(() => {
+      if (!hasWon || !gameState.isHardMode || !gameState.autoBankEnabled) return;
+      const timer = window.setTimeout(() => autoBankRef.current(), AUTO_BANK_DELAY_MS) as unknown as number;
+      return () => window.clearTimeout(timer);
+  }, [hasWon, gameState.isHardMode, gameState.autoBankEnabled]);
 
   const handleFlip = useCallback((forceHeads: boolean = false, isAuto: boolean = false) => {
     if (isFlipping || hasWon || showMomModal.show) return;
@@ -501,7 +516,7 @@ const App: React.FC = () => {
                     // The Ward breaks instead of the streak; Heat takes the hit
                     const hasSteadyNerve = (prev.upgrades[UpgradeType.HARD_STEADY] || 0) > 0;
                     newState.wardsHeld = prev.wardsHeld - 1;
-                    newState.hardHeat = hasSteadyNerve ? Math.floor(prev.hardHeat / 2) : 0;
+                    newState.hardHeat = Math.max(getHeatFloor(prev.upgrades), hasSteadyNerve ? Math.floor(prev.hardHeat / 2) : 0);
                     newState.injectionFlipsLeft = Math.max(0, prev.injectionFlipsLeft - 1);
                     newState.history = ['W', ...prev.history].slice(0, 10) as GameState['history'];
                     if (shouldAutoInject(newState)) newState = inject(newState);
@@ -512,7 +527,7 @@ const App: React.FC = () => {
                     newState.streak = 0;
                     newState.history = ['T', ...prev.history].slice(0, 10) as GameState['history'];
                     if (prev.isHardMode) {
-                        newState.hardHeat = 0;
+                        newState.hardHeat = getHeatFloor(prev.upgrades);
                         newState.injectionFlipsLeft = 0;
                         if (prev.hardPushLevel > 0) newState.hardPushBust = true;
                     }
@@ -912,7 +927,7 @@ const App: React.FC = () => {
           <li className="flex items-start gap-2"><span className="text-red-500">-</span> Upgrades cap at {Math.round(HARD_BASE_CAP * 100)}% probability</li>
           <li className="flex items-start gap-2"><span className="text-red-500">-</span> Win Streak Requirement: {getHardGoal(gameState.stats.hardModeWins)} (+{HARD_GOAL_STEP} per Hard Win)</li>
           <li className="flex items-start gap-2"><span className="text-green-500">+</span> Heat: each Heads in a row adds +{HEAT_PER_HEADS}% (up to +{getHeatCap(gameState.upgrades)}%). A Tails wipes it.</li>
-          <li className="flex items-start gap-2"><span className="text-green-500">+</span> Clutch Zone = the last {CLUTCH_ZONE} Heads. Wards ($) each save one Tails there, but not during a Push.</li>
+          <li className="flex items-start gap-2"><span className="text-green-500">+</span> Clutch Zone = the last {getClutchZoneSize(getHardGoal(gameState.stats.hardModeWins))} Heads (it grows with the goal). Wards ($) each save one Tails there, but not during a Push.</li>
           <li className="flex items-start gap-2"><span className="text-green-500">+</span> Void Injection ({injectionCost} VF a charge): +{Math.round(INJECTION_BOOST * 100)}% for {INJECTION_FLIPS} flips, past the cap. Usable in the Clutch Zone and during a Push. Nothing goes above {Math.round(HARD_CHANCE_CEILING * 100)}%.</li>
           <li className="flex items-start gap-2"><span className="text-green-500">+</span> At the goal: Bank the win, or Push {PUSH_STEP} more Heads for double rewards. A bust pays no Resolve.</li>
           <li className="flex items-start gap-2"><span className="text-green-500">+</span> Every 10-streak pays VF. Hard wins pay Resolve, which buys permanent upgrades in The Abyss.</li>
@@ -1140,6 +1155,9 @@ const App: React.FC = () => {
                                 <button onClick={() => setAscendToHard(true)} className={`px-3 py-2 border cursor-pointer ${ascendToHard ? 'border-red-500 text-red-300 bg-red-950/40' : 'border-noir-700 text-noir-500 hover:text-white'}`}>Hard (goal {getHardGoal(gameState.stats.hardModeWins + 1)})</button>
                                 <button onClick={() => setAscendToHard(false)} className={`px-3 py-2 border cursor-pointer ${!ascendToHard ? 'border-amber-500 text-amber-300 bg-amber-950/40' : 'border-noir-700 text-noir-500 hover:text-white'}`}>Normal</button>
                             </div>
+                            <button onClick={toggleAutoBank} className={`text-[11px] font-mono uppercase tracking-wider cursor-pointer ${gameState.autoBankEnabled ? 'text-amber-300' : 'text-noir-500 hover:text-white'}`}>
+                                {gameState.autoBankEnabled ? `Auto-bank ON: banking in ${AUTO_BANK_DELAY_MS / 1000}s (tap to turn off)` : 'Auto-bank future wins: OFF'}
+                            </button>
                             <button onClick={() => ascend(ascendToHard)} className="w-full px-8 py-4 bg-purple-600 text-white font-mono font-bold tracking-widest hover:bg-purple-500 transition-all duration-300 shadow-lg hover:shadow-purple-500/40 transform hover:-translate-y-1 flex items-center justify-center gap-3"><Sparkles size={20} /> {canPush ? 'BANK & ASCEND' : 'ASCEND'} → {ascendToHard ? 'HARD' : 'NORMAL'}</button>
                         </div>
                     ) : (

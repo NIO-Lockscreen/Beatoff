@@ -19,14 +19,17 @@ export const HARD_GOAL_STEP = 2;
 export const HARD_GOAL_SOFTCAP_WINS = 6;
 export const HARD_GOAL_LATE_STEP = 1;
 
-export const CLUTCH_ZONE = 10;             // Wards only work in the last N Heads before the goal, never during a Push
+// Wards and Injection only work in the clutch zone: the last N Heads before the goal (never Wards during a Push).
+// It grows with the goal so late wins keep their clutch moments instead of being decided before the zone.
+export const CLUTCH_ZONE = 10;
+export const CLUTCH_ZONE_GOAL_FRACTION = 0.25;
 export const BASE_WARD_CAP = 1;
 
 export const INJECTION_BOOST = 0.20;
 export const INJECTION_FLIPS = 10;
 export const MAX_INJECTION_CHARGES = 3;
-export const AUTO_INJECT_MAX_CHANCE = 0.80; // Auto-inject skips moments where the boost would mostly hit the ceiling
 export const CLUTCH_PAUSE_MS = 3000;
+export const AUTO_BANK_DELAY_MS = 5000;
 export const HARD_EVENT_HOLD_MS = 1200;     // Clutch/Ward/Injection banners can't be overwritten by streak pops this soon
 export const HARD_CONFETTI_BURST = 40;      // Streaks of 20-30 would otherwise bury the HUD in confetti
 
@@ -51,7 +54,9 @@ export const getHardGoal = (hardWins: number, pushLevel: number = 0): number => 
 export const getGoal = (state: GoalState): number =>
     state.isHardMode ? getHardGoal(state.stats.hardModeWins, state.hardPushLevel) : WINNING_STREAK;
 
-export const getClutchZoneStart = (goal: number): number => Math.max(0, goal - CLUTCH_ZONE);
+export const getClutchZoneSize = (goal: number): number => Math.max(CLUTCH_ZONE, Math.round(goal * CLUTCH_ZONE_GOAL_FRACTION));
+
+export const getClutchZoneStart = (goal: number): number => Math.max(0, goal - getClutchZoneSize(goal));
 
 export const isInClutchZone = (state: GoalState & Pick<GameState, 'streak'>): boolean =>
     state.isHardMode && state.streak >= getClutchZoneStart(getGoal(state));
@@ -62,6 +67,10 @@ export const canWardAbsorb = (state: GoalState & Pick<GameState, 'streak' | 'war
 
 export const getHeatCap = (upgrades: Record<UpgradeType, number>): number =>
     BASE_HEAT_CAP + (upgrades[UpgradeType.HARD_MOMENTUM] || 0) * HEAT_CAP_PER_MOMENTUM;
+
+// Head Start: what Heat falls back to after a Tails (and at the start of a run)
+export const getHeatFloor = (upgrades: Record<UpgradeType, number>): number =>
+    Math.min(getHeatCap(upgrades), upgrades[UpgradeType.HARD_HEAD_START] || 0);
 
 export const getWardCap = (upgrades: Record<UpgradeType, number>): number =>
     BASE_WARD_CAP + (upgrades[UpgradeType.HARD_BULWARK] || 0);
@@ -95,11 +104,8 @@ export const inject = <T extends InjectState>(state: T): T => {
     };
 };
 
+// Auto-inject only holds back when the ceiling is already reached (charges are plentiful)
 export const shouldAutoInject = (state: InjectState & Pick<GameState, 'autoInjectEnabled'>): boolean =>
-    state.autoInjectEnabled && canInject(state) && getChance(state) <= AUTO_INJECT_MAX_CHANCE;
-
-// Starting a Push is the moment that matters most, so auto-inject only holds back at the ceiling
-export const shouldAutoInjectOnPush = (state: InjectState & Pick<GameState, 'autoInjectEnabled'>): boolean =>
     state.autoInjectEnabled && canInject(state) && getChance(state) < HARD_CHANCE_CEILING;
 
 export const getPushMultiplier = (pushLevel: number, bust: boolean): number =>
@@ -116,7 +122,7 @@ export const getHardWinRewards = (hardWins: number, pushLevel: number, bust: boo
 // Exact odds of landing PUSH_STEP more Heads from the current state. Wards don't
 // apply during a Push, so the only winning path is Heads every flip.
 // useInjection: whether a charge is spent as the Push starts (defaults to what auto-inject would do).
-export const getPushSuccessChance = (state: GameState, useInjection: boolean = shouldAutoInjectOnPush(state)): number => {
+export const getPushSuccessChance = (state: GameState, useInjection: boolean = shouldAutoInject(state)): number => {
     const base = getBaseChance(state.upgrades);
     const heatCap = getHeatCap(state.upgrades);
     const hasCharge = (state.upgrades[UpgradeType.HARD_MODE_BUFF] || 0) > 0;

@@ -53,6 +53,7 @@ const ICONS = {
   [UpgradeType.HARD_BULWARK]: ShieldPlus,
   [UpgradeType.HARD_MOMENTUM]: Gauge,
   [UpgradeType.HARD_STEADY]: Anchor,
+  [UpgradeType.HARD_HEAD_START]: Flame,
 };
 
 const Shop: React.FC<ShopProps> = ({ 

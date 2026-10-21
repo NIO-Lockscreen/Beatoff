@@ -31,6 +31,7 @@ export enum UpgradeType {
   HARD_BULWARK = 'HARD_BULWARK',     // Abyss: +1 Ward capacity
   HARD_MOMENTUM = 'HARD_MOMENTUM',   // Abyss: +5% Heat cap
   HARD_STEADY = 'HARD_STEADY',       // Abyss: Ward saves halve Heat instead of resetting it
+  HARD_HEAD_START = 'HARD_HEAD_START', // Abyss: Heat never drops below this many points
 }
 
 export interface UpgradeConfig {
@@ -90,6 +91,7 @@ export interface GameState {
   hardPushLevel: number; // Pushes taken past the goal this run
   hardPushBust: boolean; // A push ended on an unabsorbed Tails
   autoInjectEnabled: boolean; // Fire Void Injection automatically at clutch moments
+  autoBankEnabled: boolean; // Bank hard mode wins automatically after a short delay
   
   // UX
   seenUpgrades: UpgradeType[]; // List of upgrades user has scrolled to/seen
