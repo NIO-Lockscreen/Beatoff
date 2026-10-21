@@ -362,8 +362,9 @@ export const UPGRADES: Record<UpgradeType, UpgradeConfig> = {
     id: UpgradeType.HARD_HEAD_START,
     name: "Head Start",
     description: "Heat never drops below this, even after a Tails. For Gauntlet veterans.",
-    baseCost: 500,
-    costTiers: [500, 1000, 2000],
+    baseCost: 300,
+    // Late-game sink: arrives around wins #11, #15 and #20 at the simulated Resolve rate
+    costTiers: [300, 600, 1200],
     maxLevel: 3,
     isPrestige: true,
     currency: 'resolve',
