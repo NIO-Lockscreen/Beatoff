@@ -321,6 +321,8 @@ const App: React.FC = () => {
           nextStats.hardModeWins = gameState.stats.hardModeWins + 1;
       }
       if (wasHardWin || nextHardMode) nextTitles['HARD_MAN'] = Math.max(1, nextStats.hardModeWins);
+      // Purist = the run was won without a single auto flip
+      if (gameState.isPuristRun) nextStats.puristWins = gameState.stats.puristWins + 1;
       saveMetaStats(nextStats);
       
       let nextActiveTitle = gameState.activeTitle;
@@ -341,9 +343,10 @@ const App: React.FC = () => {
           const now = Date.now();
           const title = nextActiveTitle || undefined;
           
-          if (newPrestigeLevel >= nextStats.maxPrestigeLevel) {
-               LeaderboardService.submitScores([{ category: 'prestige', entry: { name, score: newPrestigeLevel, date: now, title } }]);
-          }
+          const updates: { category: keyof GlobalLeaderboard, entry: LeaderboardEntry }[] = [];
+          if (newPrestigeLevel >= nextStats.maxPrestigeLevel) updates.push({ category: 'prestige', entry: { name, score: newPrestigeLevel, date: now, title } });
+          if (gameState.isPuristRun) updates.push({ category: 'purist', entry: { name, score: nextStats.puristWins, date: now, title } });
+          if (updates.length > 0) LeaderboardService.submitScores(updates);
       }
 
       setGameState(nextState);
@@ -554,15 +557,12 @@ const App: React.FC = () => {
             setShowHardModePrompt(true);
         }
 
+        // Purist wins are counted and submitted on ascend, so reloading the win screen can't double-count
         if (gameState.playerName && !gameState.hasCheated) {
-             const updates: { category: keyof GlobalLeaderboard, entry: LeaderboardEntry }[] = [];
-             if (gameState.isPuristRun) updates.push({ category: 'purist', entry: { name: gameState.playerName, score: gameState.stats.puristWins + 1, date: Date.now() } });
-             updates.push({ category: 'rich', entry: { name: gameState.playerName, score: gameState.stats.highestCash, date: Date.now() } });
-             
-             if (updates.length > 0) LeaderboardService.submitScores(updates);
+             LeaderboardService.submitScores([{ category: 'rich', entry: { name: gameState.playerName, score: gameState.stats.highestCash, date: Date.now() } }]);
         }
     }
-  }, [gameState.streak, gameState.hardPushBust, currentGoal, hasWon, gameState.isHardMode, gameState.prestigeLevel, gameState.playerName, gameState.hasCheated, gameState.isPuristRun, gameState.stats]);
+  }, [gameState.streak, gameState.hardPushBust, currentGoal, hasWon, gameState.isHardMode, gameState.prestigeLevel, gameState.playerName, gameState.hasCheated, gameState.stats]);
 
   // Auto Flip
   useEffect(() => {
