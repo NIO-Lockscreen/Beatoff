@@ -418,7 +418,7 @@ const App: React.FC = () => {
         }
 
         setGameState(prev => {
-            let newState = { ...prev, totalFlips: prev.totalFlips + 1, upgrades: { ...prev.upgrades }, stats: { ...prev.stats } };
+            let newState = { ...prev, totalFlips: prev.totalFlips + 1, stats: { ...prev.stats } };
             const zoneStart = getClutchZoneStart(getGoal(prev));
             const wardSave = !isHeads && prev.isHardMode && prev.wardsHeld > 0 && prev.streak >= zoneStart;
             
@@ -578,7 +578,7 @@ const App: React.FC = () => {
     }
   }, [gameState.autoFlipEnabled, isFlipping, hasWon, gameState.streak, gameState.hardPushBust, currentGoal, gameState.upgrades, handleFlip, showMomModal, isClutchPaused, clutchPauseUntil]);
 
-  // Auto Buy
+  // Auto Buy (keyed on the unlock only, so purchases and flips don't keep restarting the 1s interval)
   useEffect(() => {
     if (gameState.autoBuyEnabled && gameState.upgrades[UpgradeType.PRESTIGE_AUTO_BUY] > 0) {
         const interval = window.setInterval(() => {
@@ -624,7 +624,7 @@ const App: React.FC = () => {
         }, 1000) as unknown as number;
         return () => window.clearInterval(interval);
     }
-  }, [gameState.autoBuyEnabled, gameState.upgrades]);
+  }, [gameState.autoBuyEnabled, gameState.upgrades[UpgradeType.PRESTIGE_AUTO_BUY]]);
 
   const handleManualSubmit = useCallback(async () => {
       if (!gameState.playerName || gameState.hasCheated) return;
