@@ -12,9 +12,10 @@ import Shop from './components/Shop';
 import ProbabilityModal from './components/ProbabilityModal';
 import LeaderboardModal from './components/LeaderboardModal';
 import ConfettiSystem from './components/ConfettiSystem';
+import DebugPanel, { DebugControls, DebugEvent, DebugOutcome } from './components/DebugPanel';
 import { AudioService } from './services/audioService';
 import { LeaderboardService } from './services/leaderboardService';
-import { HelpCircle, Trash2, Trophy, Volume2, VolumeX, Sparkles, Heart, List, Crown, Skull, Syringe, Shield, Flame, LogOut } from 'lucide-react';
+import { HelpCircle, Trash2, Trophy, Volume2, VolumeX, Sparkles, Heart, List, Crown, Skull, Syringe, Shield, Flame, LogOut, Bug } from 'lucide-react';
 
 const CELEBRATION_MESSAGES = [
   "", "", "LUCKY", "HEATING UP", "UNREAL", "DEFYING ODDS", "SYSTEM ERROR", "IMPOSSIBLE", 
@@ -228,6 +229,14 @@ const App: React.FC = () => {
   // Edge landings hold auto-flip briefly on their own timer (never a shared celebration timer, which
   // another celebration could cancel and leave auto-flip stuck)
   const [edgeHoldUntil, setEdgeHoldUntil] = useState(0);
+  // Debug branch: Q opens the debug panel
+  const [showDebug, setShowDebug] = useState(false);
+  const [debugControls, setDebugControls] = useState<DebugControls>({ forceNext: null, rig: null, speed: 1, pauseAuto: false });
+  const [debugEvents, setDebugEvents] = useState<DebugEvent[]>([]);
+  const debugRef = useRef(debugControls);
+  debugRef.current = debugControls;
+  const forceNextRef = useRef<DebugOutcome | null>(null); // consumed by the next flip
+  const debugSpeed = debugControls.speed;
   const [hasWon, setHasWon] = useState(false);
   // tone/sub mark hard mode events, which get their own colour and caption
   const [celebration, setCelebration] = useState<{text: string, level: number, id: number, tone?: 'clutch' | 'ward' | 'inject' | 'edge', sub?: string} | null>(null);
@@ -245,7 +254,14 @@ const App: React.FC = () => {
   const modalOpenRef = useRef(false);
 
   // Hard mode events outrank streak pops: hold them briefly so the next Heads can't overwrite them
+  // Hard events fire from inside state updaters, which StrictMode runs twice in dev: drop exact repeats
+  const logDebugEvent = (text: string, sub: string) =>
+      setDebugEvents(ev => ev[0] && ev[0].text === text && ev[0].sub === sub && Date.now() - ev[0].at < 100
+          ? ev
+          : [{ id: Date.now() + Math.random(), at: Date.now(), text, sub }, ...ev].slice(0, 40));
+
   const showHardEvent = (text: string, tone: 'clutch' | 'ward' | 'inject' | 'edge', sub: string, level: number) => {
+      logDebugEvent(text, sub);
       if (celebrationTimeoutRef.current) window.clearTimeout(celebrationTimeoutRef.current);
       celebrationHoldUntilRef.current = Date.now() + HARD_EVENT_HOLD_MS;
       setCelebration({ text, level, id: Date.now(), tone, sub });
@@ -437,6 +453,15 @@ const App: React.FC = () => {
       showHardEvent("INJECTED", 'inject', `+${Math.round(INJECTION_BOOST * 100)}% FOR ${INJECTION_FLIPS} FLIPS`, gameState.streak);
   };
 
+  const debugMutate = (fn: (s: GameState) => GameState) => setGameState(p => ({ ...fn(p), hasCheated: true }));
+  const updateDebugControls = (patch: Partial<DebugControls>) => {
+      if ('forceNext' in patch) forceNextRef.current = patch.forceNext ?? null;
+      setDebugControls(c => ({ ...c, ...patch }));
+  };
+  useEffect(() => {
+      if (hasWon && gameState.streak < currentGoal && !gameState.hardPushBust) setHasWon(false);
+  }, [hasWon, gameState.streak, currentGoal, gameState.hardPushBust]);
+
   const toggleAutoInject = () => setGameState(p => ({ ...p, autoInjectEnabled: !p.autoInjectEnabled }));
   const toggleAutoBank = () => setGameState(p => ({ ...p, autoBankEnabled: !p.autoBankEnabled }));
 
@@ -446,9 +471,9 @@ const App: React.FC = () => {
   autoBankRef.current = () => ascend(ascendToHard);
   useEffect(() => {
       if (!hasWon || !gameState.isHardMode || !gameState.autoBankEnabled) return;
-      const timer = window.setTimeout(() => autoBankRef.current(), AUTO_BANK_DELAY_MS) as unknown as number;
+      const timer = window.setTimeout(() => autoBankRef.current(), AUTO_BANK_DELAY_MS / debugSpeed) as unknown as number;
       return () => window.clearTimeout(timer);
-  }, [hasWon, gameState.isHardMode, gameState.autoBankEnabled]);
+  }, [hasWon, gameState.isHardMode, gameState.autoBankEnabled, debugSpeed]);
 
   const handleFlip = useCallback((isAuto: boolean = false) => {
     if (isFlipping || hasWon || showMomModal.show) return;
@@ -460,27 +485,32 @@ const App: React.FC = () => {
     
     let duration = UPGRADES[UpgradeType.SPEED].getEffect(speedLevel);
     duration = Math.max(hasLimitless ? 1 : 50, duration - (fluxLevel * 250));
+    duration = Math.max(1, duration / debugRef.current.speed);
 
     if (duration > 50) AudioService.playFlip();
 
     flipTimeoutRef.current = window.setTimeout(() => {
         const current = stateRef.current;
+        // Debug: a one-shot forced outcome wins over a rigged one
+        const forcedNext = forceNextRef.current;
+        if (forcedNext) { forceNextRef.current = null; setDebugControls(c => ({ ...c, forceNext: null })); }
+        const forced = forcedNext ?? debugRef.current.rig;
         const roll = Math.random();
         const edgeChance = getEdgeChance(current);
-        const isEdge = roll >= 1 - edgeChance;
-        const isHeads = isEdge || roll < getChance(current) * (1 - edgeChance);
+        const isEdge = forced ? forced === 'E' : roll >= 1 - edgeChance;
+        const isHeads = isEdge || (forced ? forced === 'H' : roll < getChance(current) * (1 - edgeChance));
         const result = isEdge ? 'E' : isHeads ? 'H' : 'T';
         // An edge counts as up to EDGE_STREAK Heads at once (never past the goal)
         const headsSteps = isEdge ? Math.max(1, Math.min(EDGE_STREAK, getGoal(current) - current.streak)) : 1;
         
         setCoinSide(result);
-        if (isEdge) setEdgeHoldUntil(Date.now() + EDGE_HOLD_MS);
+        if (isEdge) setEdgeHoldUntil(Date.now() + EDGE_HOLD_MS / debugRef.current.speed);
 
         // Entering the clutch zone on auto with auto-inject off: hold briefly so the player can choose
         const zoneStartNow = getClutchZoneStart(getGoal(current));
         if (isHeads && isAuto && !current.autoInjectEnabled && canInject({ ...current, streak: current.streak + headsSteps }) &&
             current.streak < zoneStartNow && current.streak + headsSteps >= zoneStartNow) {
-            setClutchPauseUntil(Date.now() + CLUTCH_PAUSE_MS);
+            setClutchPauseUntil(Date.now() + CLUTCH_PAUSE_MS / debugRef.current.speed);
         }
 
         setGameState(prev => {
@@ -639,6 +669,7 @@ const App: React.FC = () => {
         setHasWon(true);
         setClutchPauseUntil(0);
         setEdgeHoldUntil(0);
+        logDebugEvent(gameState.hardPushBust ? 'BUST' : 'WIN', `goal ${currentGoal} • ${gameState.totalFlips.toLocaleString()} flips`);
         
         saveMetaStats(gameState.stats);
         
@@ -665,11 +696,11 @@ const App: React.FC = () => {
         const timer = window.setTimeout(() => setEdgeHoldUntil(0), Math.max(0, edgeHoldUntil - Date.now())) as unknown as number;
         return () => window.clearTimeout(timer);
     }
-    if (gameState.autoFlipEnabled && hasAuto && !isFlipping && !hasWon && gameState.streak < currentGoal && !gameState.hardPushBust && !showMomModal.show && !hardDialogOpen) {
-        const timer = window.setTimeout(() => handleFlip(true), 100) as unknown as number;
+    if (gameState.autoFlipEnabled && hasAuto && !isFlipping && !hasWon && gameState.streak < currentGoal && !gameState.hardPushBust && !showMomModal.show && !hardDialogOpen && !debugControls.pauseAuto) {
+        const timer = window.setTimeout(() => handleFlip(true), 100 / debugSpeed) as unknown as number;
         return () => window.clearTimeout(timer);
     }
-  }, [gameState.autoFlipEnabled, isFlipping, hasWon, gameState.streak, gameState.hardPushBust, currentGoal, gameState.upgrades, handleFlip, showMomModal, isClutchPaused, clutchPauseUntil, isEdgeHold, edgeHoldUntil, hardDialogOpen]);
+  }, [gameState.autoFlipEnabled, isFlipping, hasWon, gameState.streak, gameState.hardPushBust, currentGoal, gameState.upgrades, handleFlip, showMomModal, isClutchPaused, clutchPauseUntil, isEdgeHold, edgeHoldUntil, hardDialogOpen, debugControls.pauseAuto, debugSpeed]);
 
   // Auto Buy (keyed on the unlock only, so purchases and flips don't keep restarting the 1s interval)
   useEffect(() => {
@@ -714,10 +745,10 @@ const App: React.FC = () => {
                 if (bought) newState.seenUpgrades = updatedSeen;
                 return bought ? newState : prev;
             });
-        }, 1000) as unknown as number;
+        }, 1000 / debugSpeed) as unknown as number;
         return () => window.clearInterval(interval);
     }
-  }, [gameState.autoBuyEnabled, gameState.upgrades[UpgradeType.PRESTIGE_AUTO_BUY]]);
+  }, [gameState.autoBuyEnabled, gameState.upgrades[UpgradeType.PRESTIGE_AUTO_BUY], debugSpeed]);
 
   const handleManualSubmit = useCallback(async () => {
       if (!gameState.playerName || gameState.hasCheated) return;
@@ -883,6 +914,8 @@ const App: React.FC = () => {
     const handleKeyDown = (e: KeyboardEvent) => {
         if ((e.target as HTMLElement).tagName === 'INPUT') return;
         if (e.code === 'Space') { e.preventDefault(); if (!modalOpenRef.current) handleFlip(); }
+        if (e.code === 'KeyQ' && !e.ctrlKey && !e.metaKey && !e.altKey) setShowDebug(v => !v);
+        if (e.code === 'Escape') setShowDebug(false);
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
@@ -1301,6 +1334,22 @@ const App: React.FC = () => {
         isPushing={gameState.hardPushLevel > 0}
         injectionMeter={gameState.injectionMeter}
       />
+
+      {showDebug ? (
+          <DebugPanel
+              state={gameState}
+              controls={debugControls}
+              onControls={updateDebugControls}
+              mutate={debugMutate}
+              events={debugEvents}
+              onClearEvents={() => setDebugEvents([])}
+              onClose={() => setShowDebug(false)}
+          />
+      ) : (
+          <button data-no-flip onClick={() => setShowDebug(true)} className="fixed z-[180] left-2 bottom-24 px-2 py-1 text-[10px] font-mono font-bold border border-emerald-800/70 text-emerald-400/80 bg-black/70 hover:text-emerald-200 cursor-pointer flex items-center gap-1" title="Debug menu (Q)">
+              <Bug size={12} /> DBG
+          </button>
+      )}
 
       <div className="relative z-[100]">
         <ProbabilityModal isOpen={showModal} onClose={() => setShowModal(false)} currentChance={currentChance} />
