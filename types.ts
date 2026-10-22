@@ -26,7 +26,7 @@ export enum UpgradeType {
   PRESTIGE_PARTY_POOPER = 'PRESTIGE_PARTY_POOPER', // Disable confetti effects
 
   // Hard Mode
-  HARD_MODE_BUFF = 'HARD_MODE_BUFF', // Void Injection charges (+20% for 10 flips)
+  HARD_MODE_BUFF = 'HARD_MODE_BUFF', // Void Injection charges held (+20% for 10 flips), earned via the meter
   HARD_WARD = 'HARD_WARD',           // $ consumable: absorbs a Tails in the clutch zone (level = bought this run)
   HARD_BULWARK = 'HARD_BULWARK',     // Abyss: +1 Ward capacity
   HARD_MOMENTUM = 'HARD_MOMENTUM',   // Abyss: +5% Heat cap
@@ -92,7 +92,8 @@ export interface GameState {
   hardPushBust: boolean; // A push ended on an unabsorbed Tails
   autoInjectEnabled: boolean; // Fire Void Injection automatically at clutch moments
   autoBankEnabled: boolean; // Bank hard mode wins automatically after a short delay
-  injectionsBoughtThisRun: number; // Void Injection charges bought this run (sets the next charge's price)
+  injectionMeter: number; // Progress toward the next Void Injection charge (earned in hard mode play)
+  hardStarterGranted: boolean; // The one-time starter Void Injection charges have been given
   
   // UX
   seenUpgrades: UpgradeType[]; // List of upgrades user has scrolled to/seen

@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { UpgradeType, PlayerStats } from '../types';
 import { UPGRADES, getWardPrice } from '../constants';
-import { getWardCap } from '../hardMode';
+import { getWardCap, INJECTION_METER_PER_CHARGE } from '../hardMode';
 import { Zap, TrendingUp, Clock, Coins, PlayCircle, ShieldCheck, Flame, Ghost, Sparkles, Hourglass, Infinity, Skull, Crown, Heart, Power, Gem, Bot, Package, Syringe, Medal, VolumeX, Shield, ShieldPlus, Gauge, Anchor } from 'lucide-react';
 
 interface ShopProps {
@@ -25,7 +25,7 @@ interface ShopProps {
   resolve: number;
   wardsHeld: number;
   isPushing: boolean;
-  injectionPrice: number;
+  injectionMeter: number;
 }
 
 const ICONS = {
@@ -79,7 +79,7 @@ const Shop: React.FC<ShopProps> = ({
   resolve,
   wardsHeld,
   isPushing,
-  injectionPrice
+  injectionMeter
 }) => {
   
   const hasLimitless = (upgrades[UpgradeType.PRESTIGE_LIMITLESS] || 0) > 0;
@@ -242,7 +242,7 @@ const Shop: React.FC<ShopProps> = ({
     } else if (isWard) {
         cost = isMaxed ? 0 : (getWardPrice(upgrades, prestigeLevel) ?? 0);
     } else if (upgrade.id === UpgradeType.HARD_MODE_BUFF) {
-        cost = isMaxed ? 0 : injectionPrice;
+        cost = 0; // Earned through the meter, not bought
     } else if (isPrestige && !isResolve && cost > 50) {
         cost = 50;
     }
@@ -252,7 +252,8 @@ const Shop: React.FC<ShopProps> = ({
     const isGoldDigger = upgrade.id === UpgradeType.PRESTIGE_GOLD_DIGGER;
     const effectiveCurrency = isGoldDigger ? money : currency;
 
-    const canAfford = !isMaxed && !wardsFull && !wardsBlocked && effectiveCurrency >= cost;
+    const isEarnedOnly = upgrade.id === UpgradeType.HARD_MODE_BUFF;
+    const canAfford = !isEarnedOnly && !isMaxed && !wardsFull && !wardsBlocked && effectiveCurrency >= cost;
     
     const Icon = ICONS[upgrade.id] || Zap;
     
@@ -428,8 +429,10 @@ const Shop: React.FC<ShopProps> = ({
                 }
             `}
             >
-            {isMaxed
-                ? (upgrade.id === UpgradeType.HARD_MODE_BUFF ? 'FULL' : 'MAXED')
+            {isEarnedOnly
+                ? (isMaxed ? 'FULL' : `METER ${injectionMeter}/${INJECTION_METER_PER_CHARGE}`)
+                : isMaxed
+                ? 'MAXED'
                 : wardsBlocked
                     ? 'NOT DURING PUSH'
                 : wardsFull

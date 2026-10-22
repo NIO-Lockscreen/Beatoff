@@ -14,23 +14,25 @@ export const BASE_HEAT_CAP = 20;
 export const HEAT_CAP_PER_MOMENTUM = 5;
 
 // Goal grows with every hard win, then slows down so it never becomes a wall
-// (simulated median: ~11 min for win #1, ~2.5 h by win #20, each win <= 1.5x the last)
-export const HARD_GOAL_STEP = 2;
-export const HARD_GOAL_SOFTCAP_WINS = 6;
-export const HARD_GOAL_LATE_STEP = 1;
+// (simulated median: ~10 min for win #1, ~20-25 min late, a clutch zone entry every ~5 min throughout)
+export const HARD_GOAL_STEP = 1;
+export const HARD_GOAL_SOFTCAP_WINS = 10;
+export const HARD_GOAL_LATE_STEP = 0.5;
 
-// Wards and Injection only work in the clutch zone: the last N Heads before the goal (never Wards during a Push).
-// It grows with the goal so late wins keep their clutch moments instead of being decided before the zone.
-export const CLUTCH_ZONE = 10;
-export const CLUTCH_ZONE_GOAL_FRACTION = 0.25;
+// Wards and Injection only work in the clutch zone (never Wards during a Push). It starts at a fixed
+// streak, so reaching it doesn't get harder as the goal grows; a longer goal just means a longer zone.
+export const CLUTCH_ZONE_START = 18;
+export const CLUTCH_ZONE_MIN = 10;          // ...but it's always at least the last 10 Heads
 export const BASE_WARD_CAP = 1;
 
 export const INJECTION_BOOST = 0.20;
 export const INJECTION_FLIPS = 10;
 export const MAX_INJECTION_CHARGES = 3;
-// Price of each Void Injection charge bought this run (the last entry repeats); resets on ascend
-export const INJECTION_PRICES = [5];
-export const HARD_VF_PER_TEN_STREAK = 5;   // VF paid each time a hard mode streak hits a multiple of 10
+// Charges are earned, not bought: every 10-streak and every hard win fill a meter, and each full
+// meter becomes a charge. A big VF bank can't buy them, so they stay scarce for veterans too.
+export const INJECTION_METER_PER_CHARGE = 20;
+export const INJECTION_METER_PER_TEN_STREAK = 1;
+export const HARD_VF_PER_TEN_STREAK = 0;   // 10-streaks feed the Injection meter instead of paying VF
 export const CLUTCH_PAUSE_MS = 3000;
 export const AUTO_BANK_DELAY_MS = 5000;
 export const HARD_EVENT_HOLD_MS = 1000;     // Clutch/Ward/Injection banners show this long and can't be overwritten by streak pops
@@ -47,20 +49,18 @@ export const RESOLVE_PER_WIN_STEP = 10;
 
 type ChanceState = Pick<GameState, 'upgrades' | 'isHardMode' | 'hardHeat' | 'injectionFlipsLeft'>;
 type GoalState = Pick<GameState, 'isHardMode' | 'hardPushLevel'> & { stats: Pick<GameState['stats'], 'hardModeWins'> };
-type InjectState = ChanceState & GoalState & Pick<GameState, 'streak'>;
+type InjectState = ChanceState & GoalState & Pick<GameState, 'streak' | 'injectionMeter'>;
 
 export const getHardGoal = (hardWins: number, pushLevel: number = 0): number => {
     const early = Math.min(hardWins, HARD_GOAL_SOFTCAP_WINS);
     const late = Math.max(0, hardWins - HARD_GOAL_SOFTCAP_WINS);
-    return HARD_MODE_WINNING_STREAK + early * HARD_GOAL_STEP + late * HARD_GOAL_LATE_STEP + pushLevel * PUSH_STEP;
+    return HARD_MODE_WINNING_STREAK + early * HARD_GOAL_STEP + Math.floor(late * HARD_GOAL_LATE_STEP) + pushLevel * PUSH_STEP;
 };
 
 export const getGoal = (state: GoalState): number =>
     state.isHardMode ? getHardGoal(state.stats.hardModeWins, state.hardPushLevel) : WINNING_STREAK;
 
-export const getClutchZoneSize = (goal: number): number => Math.max(CLUTCH_ZONE, Math.round(goal * CLUTCH_ZONE_GOAL_FRACTION));
-
-export const getClutchZoneStart = (goal: number): number => Math.max(0, goal - getClutchZoneSize(goal));
+export const getClutchZoneStart = (goal: number): number => Math.max(0, Math.min(goal - CLUTCH_ZONE_MIN, CLUTCH_ZONE_START));
 
 export const isInClutchZone = (state: GoalState & Pick<GameState, 'streak'>): boolean =>
     state.isHardMode && state.streak >= getClutchZoneStart(getGoal(state));
@@ -98,22 +98,37 @@ export const canInject = (state: InjectState): boolean =>
     state.isHardMode && state.injectionFlipsLeft === 0 && (state.upgrades[UpgradeType.HARD_MODE_BUFF] || 0) > 0 &&
     (isInClutchZone(state) || state.hardPushLevel > 0);
 
-// Consumes a Void Injection charge. Returns the same object if nothing changed.
+// Turns full meters into charges while there's room; a full meter waits (capped) while charges are full
+export const settleInjectionMeter = <T extends Pick<GameState, 'upgrades' | 'injectionMeter'>>(state: T): T => {
+    let charges = state.upgrades[UpgradeType.HARD_MODE_BUFF] || 0;
+    let meter = state.injectionMeter;
+    while (meter >= INJECTION_METER_PER_CHARGE && charges < MAX_INJECTION_CHARGES) {
+        meter -= INJECTION_METER_PER_CHARGE;
+        charges++;
+    }
+    meter = Math.min(meter, INJECTION_METER_PER_CHARGE);
+    if (charges === (state.upgrades[UpgradeType.HARD_MODE_BUFF] || 0) && meter === state.injectionMeter) return state;
+    return { ...state, injectionMeter: meter, upgrades: { ...state.upgrades, [UpgradeType.HARD_MODE_BUFF]: charges } };
+};
+
+export const addInjectionMeter = <T extends Pick<GameState, 'upgrades' | 'injectionMeter'>>(state: T, points: number): T =>
+    settleInjectionMeter({ ...state, injectionMeter: state.injectionMeter + points });
+
+// Consumes a Void Injection charge (a waiting full meter refills it). Returns the same object if nothing changed.
 export const inject = <T extends InjectState>(state: T): T => {
     if (!canInject(state)) return state;
-    return {
+    return settleInjectionMeter({
         ...state,
         injectionFlipsLeft: INJECTION_FLIPS,
         upgrades: { ...state.upgrades, [UpgradeType.HARD_MODE_BUFF]: state.upgrades[UpgradeType.HARD_MODE_BUFF] - 1 },
-    };
+    });
 };
 
-// Auto-inject only holds back when the ceiling is already reached (charges are plentiful)
-export const shouldAutoInject = (state: InjectState & Pick<GameState, 'autoInjectEnabled'>): boolean =>
-    state.autoInjectEnabled && canInject(state) && getChance(state) < HARD_CHANCE_CEILING;
-
-export const getInjectionPrice = (boughtThisRun: number): number =>
-    INJECTION_PRICES[Math.min(boughtThisRun, INJECTION_PRICES.length - 1)];
+// Auto-inject holds back at the ceiling. At zone entry it also keeps one charge in reserve for a
+// Ward break or a Push, which simulates as fast as spending it and pays more Resolve when pushing.
+export const shouldAutoInject = (state: InjectState & Pick<GameState, 'autoInjectEnabled'>, keepSpare: boolean = false): boolean =>
+    state.autoInjectEnabled && canInject(state) && getChance(state) < HARD_CHANCE_CEILING &&
+    (!keepSpare || (state.upgrades[UpgradeType.HARD_MODE_BUFF] || 0) >= 2);
 
 export const getPushMultiplier = (pushLevel: number, bust: boolean): number =>
     bust ? BUST_MULTIPLIER : Math.pow(2, pushLevel);

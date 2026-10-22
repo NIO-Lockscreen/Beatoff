@@ -3,9 +3,10 @@ import { GameState, UpgradeType, FRAGMENTS_PER_WIN, PlayerStats, GlobalLeaderboa
 import { UPGRADES, getWardPrice } from './constants';
 import {
   getGoal, getHardGoal, getChance, getBaseChance, getClutchZoneStart, isInClutchZone, getHeatCap, getWardCap, getHardWinRewards, getPushMultiplier,
-  getPushSuccessChance, inject, canInject, canWardAbsorb, shouldAutoInject, getHeatFloor, getClutchZoneSize, getInjectionPrice, HEAT_PER_HEADS, HARD_BASE_CAP, HARD_CHANCE_CEILING,
+  getPushSuccessChance, inject, canInject, canWardAbsorb, shouldAutoInject, getHeatFloor, addInjectionMeter, HEAT_PER_HEADS, HARD_BASE_CAP, HARD_CHANCE_CEILING,
   INJECTION_BOOST, INJECTION_FLIPS, MAX_PUSHES, PUSH_STEP, CLUTCH_PAUSE_MS, HARD_GOAL_STEP,
   HARD_EVENT_HOLD_MS, HARD_CONFETTI_BURST, HARD_CONFETTI_MAX, AUTO_BANK_DELAY_MS, HARD_VF_PER_TEN_STREAK,
+  INJECTION_METER_PER_CHARGE, INJECTION_METER_PER_TEN_STREAK, MAX_INJECTION_CHARGES, CLUTCH_ZONE_MIN,
 } from './hardMode';
 import Shop from './components/Shop';
 import ProbabilityModal from './components/ProbabilityModal';
@@ -69,7 +70,8 @@ const INITIAL_STATE: GameState = {
   hardPushBust: false,
   autoInjectEnabled: true,
   autoBankEnabled: false,
-  injectionsBoughtThisRun: 0,
+  injectionMeter: 0,
+  hardStarterGranted: false,
   seenUpgrades: [UpgradeType.CHANCE, UpgradeType.SPEED, UpgradeType.COMBO, UpgradeType.VALUE], 
   playerName: null,
   stats: INITIAL_STATS,
@@ -78,6 +80,13 @@ const INITIAL_STATE: GameState = {
   isPuristRun: true,
   hasCheated: false,
 };
+
+// First time in hard mode: a full set of Void Injection charges (once per save, so retreating and
+// re-entering can't farm them). Charges are otherwise only earned through the meter.
+const grantHardStarter = (state: GameState): GameState =>
+    state.isHardMode && !state.hardStarterGranted
+        ? { ...state, hardStarterGranted: true, upgrades: { ...state.upgrades, [UpgradeType.HARD_MODE_BUFF]: Math.max(state.upgrades[UpgradeType.HARD_MODE_BUFF] || 0, MAX_INJECTION_CHARGES) } }
+        : state;
 
 const SAVE_KEY = 'beatTheOdds_save';
 const META_SAVE_KEY = 'beatTheOdds_meta';
@@ -182,7 +191,8 @@ const App: React.FC = () => {
         if (typeof loaded.hardPushBust === 'undefined') loaded.hardPushBust = false;
         if (typeof loaded.autoInjectEnabled === 'undefined') loaded.autoInjectEnabled = true;
         if (typeof loaded.autoBankEnabled === 'undefined') loaded.autoBankEnabled = false;
-        if (typeof loaded.injectionsBoughtThisRun === 'undefined') loaded.injectionsBoughtThisRun = 0;
+        if (typeof loaded.injectionMeter === 'undefined') loaded.injectionMeter = 0;
+        if (typeof loaded.hardStarterGranted === 'undefined') loaded.hardStarterGranted = false;
         
         if (!loaded.seenUpgrades) {
             loaded.seenUpgrades = [UpgradeType.CHANCE, UpgradeType.SPEED, UpgradeType.COMBO, UpgradeType.VALUE];
@@ -199,7 +209,7 @@ const App: React.FC = () => {
         if (typeof loaded.isPuristRun === 'undefined') loaded.isPuristRun = true;
         if (typeof loaded.hasCheated === 'undefined') loaded.hasCheated = false;
 
-        return loaded;
+        return grantHardStarter(loaded);
     }
     const metaStats = getMetaStats();
     return { ...INITIAL_STATE, stats: metaStats };
@@ -310,6 +320,8 @@ const App: React.FC = () => {
           partyPooperEnabled: prev.partyPooperEnabled,
           autoInjectEnabled: prev.autoInjectEnabled,
           autoBankEnabled: prev.autoBankEnabled,
+          injectionMeter: prev.injectionMeter,
+          hardStarterGranted: prev.hardStarterGranted,
           hardHeat: getHeatFloor(keptUpgrades),
           isHardMode: prev.isHardMode,
           ...overrides,
@@ -354,7 +366,7 @@ const App: React.FC = () => {
       let nextActiveTitle = gameState.activeTitle;
       if (!nextActiveTitle && newPrestigeLevel === 1) nextActiveTitle = 'PRESTIGE';
 
-      const nextState = buildNewRun(gameState, {
+      let nextState = buildNewRun(gameState, {
           prestigeLevel: newPrestigeLevel,
           voidFragments: gameState.voidFragments + voidReward,
           resolve: gameState.resolve + resolveReward,
@@ -363,6 +375,8 @@ const App: React.FC = () => {
           activeTitle: nextActiveTitle,
           isHardMode: nextHardMode,
       });
+      if (wasHardWin) nextState = addInjectionMeter(nextState, voidReward);
+      nextState = grantHardStarter(nextState);
 
       if (gameState.playerName && !gameState.hasCheated) {
           const name = gameState.playerName;
@@ -383,8 +397,7 @@ const App: React.FC = () => {
   const restartRun = (nextHardMode: boolean) => {
       const nextTitles = { ...gameState.unlockedTitles };
       if (nextHardMode) nextTitles['HARD_MAN'] = Math.max(1, gameState.stats.hardModeWins);
-      // The Injection price ladder only resets on a won ascend, so retreat/re-enter can't reset it for free
-      setGameState(buildNewRun(gameState, { isHardMode: nextHardMode, unlockedTitles: nextTitles, injectionsBoughtThisRun: gameState.injectionsBoughtThisRun }));
+      setGameState(grantHardStarter(buildNewRun(gameState, { isHardMode: nextHardMode, unlockedTitles: nextTitles })));
       resetRunUi();
   };
 
@@ -501,8 +514,11 @@ const App: React.FC = () => {
                 if (prev.isHardMode) {
                     newState.hardHeat = Math.min(getHeatCap(prev.upgrades), prev.hardHeat + HEAT_PER_HEADS);
                     newState.injectionFlipsLeft = Math.max(0, prev.injectionFlipsLeft - 1);
-                    if (newStreak % 10 === 0) newState.voidFragments += HARD_VF_PER_TEN_STREAK;
-                    if (newStreak === zoneStart && shouldAutoInject(newState)) newState = inject(newState);
+                    if (newStreak % 10 === 0) {
+                        newState.voidFragments += HARD_VF_PER_TEN_STREAK;
+                        newState = addInjectionMeter(newState, INJECTION_METER_PER_TEN_STREAK);
+                    }
+                    if (newStreak === zoneStart && shouldAutoInject(newState, true)) newState = inject(newState);
                 }
                 
                 const toGo = getGoal(prev) - newStreak;
@@ -707,13 +723,10 @@ const App: React.FC = () => {
           }
 
           const level = prev.upgrades[id] || 0;
-          // Void Injection charges and Abyss upgrades have hard limits (no Limitless tiers).
-          // Their prices are read from the current state so two quick clicks can't both pay the old price.
-          if (id === UpgradeType.HARD_MODE_BUFF) {
-              const price = getInjectionPrice(prev.injectionsBoughtThisRun);
-              if (level >= UPGRADES[id].maxLevel || prev.voidFragments < price) return prev;
-              return { ...prev, voidFragments: prev.voidFragments - price, injectionsBoughtThisRun: prev.injectionsBoughtThisRun + 1, upgrades: { ...prev.upgrades, [id]: level + 1 } };
-          }
+          // Abyss upgrades have hard limits (no Limitless tiers). Hard mode prices are read from the
+          // current state so two quick clicks can't both pay the old price.
+          // Void Injection charges are earned through the meter, never bought
+          if (id === UpgradeType.HARD_MODE_BUFF) return prev;
 
           if (UPGRADES[id].currency === 'resolve') {
               const price = UPGRADES[id].costTiers[level];
@@ -886,9 +899,6 @@ const App: React.FC = () => {
       return (map[key] || key) + suffix;
   };
 
-  const injectionCost = getInjectionPrice(gameState.injectionsBoughtThisRun);
-  const buyInjectionCharge = () => handleBuy(UpgradeType.HARD_MODE_BUFF, injectionCost, true);
-
   const renderGauntletHud = () => {
       const heatCap = getHeatCap(gameState.upgrades);
       const wardCap = getWardCap(gameState.upgrades);
@@ -896,7 +906,6 @@ const App: React.FC = () => {
       const baseShown = Math.min(HARD_BASE_CAP, getBaseChance(gameState.upgrades));
       const isPushing = gameState.hardPushLevel > 0;
       const injecting = gameState.injectionFlipsLeft > 0;
-      const canBuyCharge = !injecting && charges === 0 && gameState.voidFragments >= injectionCost;
       return (
           <div data-no-flip className="mt-2 w-[280px] flex flex-col items-center gap-2 font-mono">
               <div className="flex items-center gap-2 text-[10px] text-red-400/90 tracking-wider">
@@ -921,19 +930,20 @@ const App: React.FC = () => {
                       ))}
                   </div>
                   <div className="flex items-center gap-1">
-                      {canBuyCharge ? (
-                          <button onClick={buyInjectionCharge} className="flex items-center gap-1 px-2 py-1 text-[10px] font-bold border border-purple-600 text-purple-200 hover:bg-purple-950/50 cursor-pointer" title="Buy a Void Injection charge">
-                              <Syringe size={12} /> BUY · {injectionCost} VF
-                          </button>
-                      ) : (
-                          <button onClick={fireInjection} disabled={!canInject(gameState)} className={`flex items-center gap-1 px-2 py-1 text-[10px] font-bold border transition-colors ${injecting ? 'border-red-500 text-red-300 bg-red-950/50 animate-pulse' : canInject(gameState) ? 'border-red-700 text-red-300 hover:bg-red-950/50 cursor-pointer' : 'border-noir-800 text-noir-600 cursor-not-allowed'}`} title={`Void Injection: +${Math.round(INJECTION_BOOST * 100)}% for ${INJECTION_FLIPS} flips, past the cap. Usable in the Clutch Zone and during a Push.`}>
-                              <Syringe size={12} /> {injecting ? `${gameState.injectionFlipsLeft} LEFT` : charges === 0 ? 'NO CHARGES' : canInject(gameState) ? `INJECT (${charges})` : `(${charges}) ZONE ONLY`}
-                          </button>
-                      )}
-                      <button onClick={toggleAutoInject} className={`px-2 py-1 text-[10px] font-bold border transition-colors cursor-pointer ${gameState.autoInjectEnabled ? 'border-red-700 text-red-300 bg-red-950/30' : 'border-noir-700 text-noir-500 hover:text-white'}`} title="Auto-inject on clutch zone entry, after a Ward breaks, and when a Push starts">
+                      <button onClick={fireInjection} disabled={!canInject(gameState)} className={`flex items-center gap-1 px-2 py-1 text-[10px] font-bold border transition-colors ${injecting ? 'border-red-500 text-red-300 bg-red-950/50 animate-pulse' : canInject(gameState) ? 'border-red-700 text-red-300 hover:bg-red-950/50 cursor-pointer' : 'border-noir-800 text-noir-600 cursor-not-allowed'}`} title={`Void Injection: +${Math.round(INJECTION_BOOST * 100)}% for ${INJECTION_FLIPS} flips, past the cap. Usable in the Clutch Zone and during a Push.`}>
+                          <Syringe size={12} /> {injecting ? `${gameState.injectionFlipsLeft} LEFT` : charges === 0 ? 'NO CHARGES' : canInject(gameState) ? `INJECT (${charges})` : `(${charges}) ZONE ONLY`}
+                      </button>
+                      <button onClick={toggleAutoInject} className={`px-2 py-1 text-[10px] font-bold border transition-colors cursor-pointer ${gameState.autoInjectEnabled ? 'border-red-700 text-red-300 bg-red-950/30' : 'border-noir-700 text-noir-500 hover:text-white'}`} title="Auto-inject at clutch zone entry (keeping one charge spare), after a Ward breaks, and when a Push starts">
                           AUTO-INJECT {gameState.autoInjectEnabled ? 'ON' : 'OFF'}
                       </button>
                   </div>
+              </div>
+              <div className="w-full flex items-center gap-2 text-[10px] text-noir-500" title={`Every 10-streak adds ${INJECTION_METER_PER_TEN_STREAK}, every hard win adds its VF reward`}>
+                  <span className="shrink-0">{charges >= MAX_INJECTION_CHARGES ? 'CHARGES FULL' : 'NEXT CHARGE'}</span>
+                  <div className="flex-1 h-1 bg-noir-900 rounded-full overflow-hidden">
+                      <div className="h-full bg-purple-500/70 transition-all duration-300" style={{ width: `${(gameState.injectionMeter / INJECTION_METER_PER_CHARGE) * 100}%` }} />
+                  </div>
+                  <span className="shrink-0 text-purple-300/80">{gameState.injectionMeter}/{INJECTION_METER_PER_CHARGE}</span>
               </div>
           </div>
       );
@@ -945,10 +955,11 @@ const App: React.FC = () => {
           <li className="flex items-start gap-2"><span className="text-red-500">-</span> Upgrades cap at {Math.round(HARD_BASE_CAP * 100)}% probability</li>
           <li className="flex items-start gap-2"><span className="text-red-500">-</span> Win Streak Requirement: {getHardGoal(gameState.stats.hardModeWins)} (+{HARD_GOAL_STEP} per Hard Win)</li>
           <li className="flex items-start gap-2"><span className="text-green-500">+</span> Heat: each Heads in a row adds +{HEAT_PER_HEADS}% (up to +{getHeatCap(gameState.upgrades)}%). A Tails wipes it.</li>
-          <li className="flex items-start gap-2"><span className="text-green-500">+</span> Clutch Zone = the last {getClutchZoneSize(getHardGoal(gameState.stats.hardModeWins))} Heads (it grows with the goal). Wards ($) each save one Tails there, but not during a Push.</li>
-          <li className="flex items-start gap-2"><span className="text-green-500">+</span> Void Injection ({injectionCost} VF for the next charge): +{Math.round(INJECTION_BOOST * 100)}% for {INJECTION_FLIPS} flips, past the cap. Usable in the Clutch Zone and during a Push. Nothing goes above {Math.round(HARD_CHANCE_CEILING * 100)}%.</li>
+          <li className="flex items-start gap-2"><span className="text-green-500">+</span> Clutch Zone = from {getClutchZoneStart(getHardGoal(gameState.stats.hardModeWins))} Heads to the goal (always at least the last {CLUTCH_ZONE_MIN}). Wards ($) each save one Tails there, but not during a Push.</li>
+          <li className="flex items-start gap-2"><span className="text-green-500">+</span> Void Injection: +{Math.round(INJECTION_BOOST * 100)}% for {INJECTION_FLIPS} flips, past the cap, in the Clutch Zone or a Push. Nothing goes above {Math.round(HARD_CHANCE_CEILING * 100)}%.</li>
+          <li className="flex items-start gap-2"><span className="text-green-500">+</span> Charges are earned, not bought: each 10-streak adds {INJECTION_METER_PER_TEN_STREAK} and each hard win adds its VF reward to the meter; {INJECTION_METER_PER_CHARGE} = 1 charge (hold {MAX_INJECTION_CHARGES}).</li>
           <li className="flex items-start gap-2"><span className="text-green-500">+</span> At the goal: Bank the win, or Push {PUSH_STEP} more Heads for double rewards. A bust pays no Resolve.</li>
-          <li className="flex items-start gap-2"><span className="text-green-500">+</span> Every 10-streak pays VF. Hard wins pay Resolve, which buys permanent upgrades in The Abyss.</li>
+          <li className="flex items-start gap-2"><span className="text-green-500">+</span> Hard wins pay Resolve, which buys permanent upgrades in The Abyss.</li>
           <li className="flex items-start gap-2"><span className="text-green-500">+</span> Permanent 10x Cash Multiplier</li>
       </ul>
   );
@@ -1262,7 +1273,7 @@ const App: React.FC = () => {
         resolve={gameState.resolve}
         wardsHeld={gameState.wardsHeld}
         isPushing={gameState.hardPushLevel > 0}
-        injectionPrice={injectionCost}
+        injectionMeter={gameState.injectionMeter}
       />
 
       <div className="relative z-[100]">

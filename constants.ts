@@ -1,5 +1,5 @@
 import { UpgradeType, UpgradeConfig } from './types';
-import { BASE_HEAT_CAP, HEAT_CAP_PER_MOMENTUM, BASE_WARD_CAP, INJECTION_BOOST, INJECTION_FLIPS, MAX_INJECTION_CHARGES, INJECTION_PRICES } from './hardMode';
+import { BASE_HEAT_CAP, HEAT_CAP_PER_MOMENTUM, BASE_WARD_CAP, INJECTION_BOOST, INJECTION_FLIPS, MAX_INJECTION_CHARGES, INJECTION_METER_PER_CHARGE } from './hardMode';
 
 const formatLargeNumber = (val: number): string => {
     if (val >= 1e33) return '$' + (val / 1e33).toFixed(1).replace(/\.0$/, '') + 'Dc';
@@ -301,10 +301,10 @@ export const UPGRADES: Record<UpgradeType, UpgradeConfig> = {
   [UpgradeType.HARD_MODE_BUFF]: {
     id: UpgradeType.HARD_MODE_BUFF,
     name: "Void Injection",
-    description: `+${Math.round(INJECTION_BOOST * 100)}% chance for ${INJECTION_FLIPS} flips, piercing the 60% cap. Buy charges, use them in the clutch.`,
-    baseCost: INJECTION_PRICES[0],
-    costTiers: Array(MAX_INJECTION_CHARGES).fill(INJECTION_PRICES[0]), // Real price: getInjectionPrice (rises per run)
-    maxLevel: MAX_INJECTION_CHARGES, // Charges held; one is spent per injection
+    description: `+${Math.round(INJECTION_BOOST * 100)}% chance for ${INJECTION_FLIPS} flips, piercing the 60% cap. Earned, not bought: 10-streaks and hard wins fill the meter; ${INJECTION_METER_PER_CHARGE} = 1 charge.`,
+    baseCost: 0,
+    costTiers: [0],
+    maxLevel: MAX_INJECTION_CHARGES, // Charges held; one is spent per injection (not purchasable)
     isPrestige: true,
     getEffect: (level) => level,
     formatEffect: (val) => `${val}/${MAX_INJECTION_CHARGES} Charges`,
