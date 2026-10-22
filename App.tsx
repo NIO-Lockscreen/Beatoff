@@ -241,7 +241,6 @@ const App: React.FC = () => {
   const flipTimeoutRef = useRef<number | undefined>(undefined);
   const celebrationTimeoutRef = useRef<number | undefined>(undefined);
   const deleteTimeoutRef = useRef<number | undefined>(undefined);
-  const cheatCodeBuffer = useRef<string>("");
   const celebrationHoldUntilRef = useRef(0);
   const modalOpenRef = useRef(false);
 
@@ -451,7 +450,7 @@ const App: React.FC = () => {
       return () => window.clearTimeout(timer);
   }, [hasWon, gameState.isHardMode, gameState.autoBankEnabled]);
 
-  const handleFlip = useCallback((forceHeads: boolean = false, isAuto: boolean = false) => {
+  const handleFlip = useCallback((isAuto: boolean = false) => {
     if (isFlipping || hasWon || showMomModal.show) return;
     
     setIsFlipping(true);
@@ -467,9 +466,9 @@ const App: React.FC = () => {
     flipTimeoutRef.current = window.setTimeout(() => {
         const current = stateRef.current;
         const roll = Math.random();
-        const edgeChance = forceHeads ? 0 : getEdgeChance(current);
+        const edgeChance = getEdgeChance(current);
         const isEdge = roll >= 1 - edgeChance;
-        const isHeads = isEdge || forceHeads || roll < getChance(current) * (1 - edgeChance);
+        const isHeads = isEdge || roll < getChance(current) * (1 - edgeChance);
         const result = isEdge ? 'E' : isHeads ? 'H' : 'T';
         // An edge counts as up to EDGE_STREAK Heads at once (never past the goal)
         const headsSteps = isEdge ? Math.max(1, Math.min(EDGE_STREAK, getGoal(current) - current.streak)) : 1;
@@ -628,7 +627,7 @@ const App: React.FC = () => {
       const target = e.target as HTMLElement;
       // Bail out when clicking anything interactive
       if (target.closest(INTERACTIVE_SELECTOR)) return;
-      handleFlip(false);
+      handleFlip();
     },
     [handleFlip]
   );
@@ -667,7 +666,7 @@ const App: React.FC = () => {
         return () => window.clearTimeout(timer);
     }
     if (gameState.autoFlipEnabled && hasAuto && !isFlipping && !hasWon && gameState.streak < currentGoal && !gameState.hardPushBust && !showMomModal.show && !hardDialogOpen) {
-        const timer = window.setTimeout(() => handleFlip(false, true), 100) as unknown as number;
+        const timer = window.setTimeout(() => handleFlip(true), 100) as unknown as number;
         return () => window.clearTimeout(timer);
     }
   }, [gameState.autoFlipEnabled, isFlipping, hasWon, gameState.streak, gameState.hardPushBust, currentGoal, gameState.upgrades, handleFlip, showMomModal, isClutchPaused, clutchPauseUntil, isEdgeHold, edgeHoldUntil, hardDialogOpen]);
@@ -883,16 +882,7 @@ const App: React.FC = () => {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
         if ((e.target as HTMLElement).tagName === 'INPUT') return;
-        if (e.code === 'Space') { e.preventDefault(); if (!modalOpenRef.current) handleFlip(false); }
-        if (e.code === 'KeyQ') { handleFlip(true); setGameState(p => ({ ...p, hasCheated: true, voidFragments: p.voidFragments + 5 })); }
-        if (e.key) {
-           cheatCodeBuffer.current = (cheatCodeBuffer.current + e.key).toUpperCase().slice(-3);
-           if (cheatCodeBuffer.current === "ZEX") {
-               setGameState(p => ({ ...p, prestigeLevel: 199, hasCheated: true }));
-               AudioService.playWin();
-               cheatCodeBuffer.current = "";
-           }
-        }
+        if (e.code === 'Space') { e.preventDefault(); if (!modalOpenRef.current) handleFlip(); }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
@@ -1245,7 +1235,7 @@ const App: React.FC = () => {
                     </div>
 
                     <div className="w-full flex flex-col gap-6 items-center">
-                        <button onClick={() => handleFlip(false)} disabled={isFlipping} className={`group relative w-full max-w-[240px] py-5 text-xl font-mono font-bold tracking-[0.2em] border transition-all duration-200 overflow-hidden z-20 cursor-pointer ${isFlipping ? 'border-noir-800 text-noir-700 bg-black cursor-not-allowed scale-95' : 'border-white text-white bg-transparent hover:bg-white hover:text-black hover:shadow-[0_0_30px_rgba(255,255,255,0.2)] active:scale-95'}`}><span className="relative z-10">{isFlipping ? 'FLIPPING...' : 'FLIP COIN'}</span></button>
+                        <button onClick={() => handleFlip()} disabled={isFlipping} className={`group relative w-full max-w-[240px] py-5 text-xl font-mono font-bold tracking-[0.2em] border transition-all duration-200 overflow-hidden z-20 cursor-pointer ${isFlipping ? 'border-noir-800 text-noir-700 bg-black cursor-not-allowed scale-95' : 'border-white text-white bg-transparent hover:bg-white hover:text-black hover:shadow-[0_0_30px_rgba(255,255,255,0.2)] active:scale-95'}`}><span className="relative z-10">{isFlipping ? 'FLIPPING...' : 'FLIP COIN'}</span></button>
                         <div className="flex flex-col items-center gap-1">
                              <div className="text-[10px] uppercase tracking-widest text-noir-500">Probability</div>
                              <div className="font-mono text-amber-500 text-lg font-bold flex items-center gap-2">{(currentChance * 100).toFixed(0)}%{gameState.injectionFlipsLeft > 0 && <Syringe size={14} className="text-red-500 animate-pulse" />}{gameState.isHardMode && currentChance >= HARD_CHANCE_CEILING && <span className="text-[10px] text-red-400 border border-red-800 px-1" title="The hard mode ceiling">MAX</span>}</div>
