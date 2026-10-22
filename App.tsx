@@ -3,10 +3,10 @@ import { GameState, UpgradeType, FRAGMENTS_PER_WIN, PlayerStats, GlobalLeaderboa
 import { UPGRADES, getWardPrice } from './constants';
 import {
   getGoal, getHardGoal, getChance, getBaseChance, getClutchZoneStart, isInClutchZone, getHeatCap, getWardCap, getHardWinRewards, getPushMultiplier,
-  getPushSuccessChance, inject, canInject, canWardAbsorb, shouldAutoInject, getHeatFloor, addInjectionMeter, HEAT_PER_HEADS, HARD_BASE_CAP, HARD_CHANCE_CEILING,
+  getPushSuccessChance, inject, canInject, canWardAbsorb, shouldAutoInject, getHeatFloor, addInjectionMeter, getEdgeChance, HEAT_PER_HEADS, HARD_BASE_CAP, HARD_CHANCE_CEILING,
   INJECTION_BOOST, INJECTION_FLIPS, MAX_PUSHES, PUSH_STEP, CLUTCH_PAUSE_MS, HARD_GOAL_STEP,
   HARD_EVENT_HOLD_MS, HARD_CONFETTI_BURST, HARD_CONFETTI_MAX, AUTO_BANK_DELAY_MS, HARD_VF_PER_TEN_STREAK,
-  INJECTION_METER_PER_CHARGE, INJECTION_METER_PER_TEN_STREAK, MAX_INJECTION_CHARGES, CLUTCH_ZONE_MIN,
+  INJECTION_METER_PER_CHARGE, INJECTION_METER_PER_TEN_STREAK, MAX_INJECTION_CHARGES, CLUTCH_ZONE_MIN, EDGE_STREAK, EDGE_HOLD_MS,
 } from './hardMode';
 import Shop from './components/Shop';
 import ProbabilityModal from './components/ProbabilityModal';
@@ -53,7 +53,7 @@ const INITIAL_STATE: GameState = {
     [UpgradeType.PRESTIGE_MOM]: 0, [UpgradeType.PRESTIGE_CARE_PACKAGE]: 0, [UpgradeType.PRESTIGE_VETERAN]: 0,
     [UpgradeType.PRESTIGE_PARTY_POOPER]: 0,
     [UpgradeType.HARD_MODE_BUFF]: 0, [UpgradeType.HARD_WARD]: 0, [UpgradeType.HARD_BULWARK]: 0,
-    [UpgradeType.HARD_MOMENTUM]: 0, [UpgradeType.HARD_STEADY]: 0, [UpgradeType.HARD_HEAD_START]: 0,
+    [UpgradeType.HARD_MOMENTUM]: 0, [UpgradeType.HARD_STEADY]: 0, [UpgradeType.HARD_HEAD_START]: 0, [UpgradeType.HARD_EDGE]: 0,
   },
   history: [],
   prestigeLevel: 0,
@@ -216,7 +216,7 @@ const App: React.FC = () => {
   });
 
   const [isFlipping, setIsFlipping] = useState(false);
-  const [coinSide, setCoinSide] = useState<'H' | 'T' | null>(null);
+  const [coinSide, setCoinSide] = useState<'H' | 'T' | 'E' | null>(null);
   const [showModal, setShowModal] = useState(false);
   const [showLeaderboard, setShowLeaderboard] = useState(false);
   const [showMomModal, setShowMomModal] = useState<{show: boolean, text: string}>({show: false, text: ""});
@@ -225,9 +225,12 @@ const App: React.FC = () => {
   const [showHardRules, setShowHardRules] = useState(false);
   const [ascendToHard, setAscendToHard] = useState(true);
   const [clutchPauseUntil, setClutchPauseUntil] = useState(0);
+  // Edge landings hold auto-flip briefly on their own timer (never a shared celebration timer, which
+  // another celebration could cancel and leave auto-flip stuck)
+  const [edgeHoldUntil, setEdgeHoldUntil] = useState(0);
   const [hasWon, setHasWon] = useState(false);
   // tone/sub mark hard mode events, which get their own colour and caption
-  const [celebration, setCelebration] = useState<{text: string, level: number, id: number, tone?: 'clutch' | 'ward' | 'inject', sub?: string} | null>(null);
+  const [celebration, setCelebration] = useState<{text: string, level: number, id: number, tone?: 'clutch' | 'ward' | 'inject' | 'edge', sub?: string} | null>(null);
   const [muted, setMuted] = useState(true);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [showTitleSelector, setShowTitleSelector] = useState(false);
@@ -243,7 +246,7 @@ const App: React.FC = () => {
   const modalOpenRef = useRef(false);
 
   // Hard mode events outrank streak pops: hold them briefly so the next Heads can't overwrite them
-  const showHardEvent = (text: string, tone: 'clutch' | 'ward' | 'inject', sub: string, level: number) => {
+  const showHardEvent = (text: string, tone: 'clutch' | 'ward' | 'inject' | 'edge', sub: string, level: number) => {
       if (celebrationTimeoutRef.current) window.clearTimeout(celebrationTimeoutRef.current);
       celebrationHoldUntilRef.current = Date.now() + HARD_EVENT_HOLD_MS;
       setCelebration({ text, level, id: Date.now(), tone, sub });
@@ -264,6 +267,7 @@ const App: React.FC = () => {
   const clutchZoneStart = getClutchZoneStart(currentGoal);
   const inClutchZone = isInClutchZone(gameState);
   const isClutchPaused = clutchPauseUntil > 0;
+  const isEdgeHold = edgeHoldUntil > 0;
   const hardDialogOpen = showRetreatConfirm || showHardRules || showHardModePrompt;
 
   // ── Derived: has the player ever won at least one round? ──────────────────
@@ -333,6 +337,7 @@ const App: React.FC = () => {
       setCoinSide(null);
       setCelebration(null);
       setClutchPauseUntil(0);
+      setEdgeHoldUntil(0);
       setAscendToHard(true);
   };
 
@@ -462,14 +467,20 @@ const App: React.FC = () => {
     flipTimeoutRef.current = window.setTimeout(() => {
         const current = stateRef.current;
         const roll = Math.random();
-        const isHeads = forceHeads || roll < getChance(current);
-        const result = isHeads ? 'H' : 'T';
+        const edgeChance = forceHeads ? 0 : getEdgeChance(current);
+        const isEdge = roll >= 1 - edgeChance;
+        const isHeads = isEdge || forceHeads || roll < getChance(current) * (1 - edgeChance);
+        const result = isEdge ? 'E' : isHeads ? 'H' : 'T';
+        // An edge counts as up to EDGE_STREAK Heads at once (never past the goal)
+        const headsSteps = isEdge ? Math.max(1, Math.min(EDGE_STREAK, getGoal(current) - current.streak)) : 1;
         
         setCoinSide(result);
+        if (isEdge) setEdgeHoldUntil(Date.now() + EDGE_HOLD_MS);
 
         // Entering the clutch zone on auto with auto-inject off: hold briefly so the player can choose
-        if (isHeads && isAuto && !current.autoInjectEnabled && canInject({ ...current, streak: current.streak + 1 }) &&
-            current.streak + 1 === getClutchZoneStart(getGoal(current))) {
+        const zoneStartNow = getClutchZoneStart(getGoal(current));
+        if (isHeads && isAuto && !current.autoInjectEnabled && canInject({ ...current, streak: current.streak + headsSteps }) &&
+            current.streak < zoneStartNow && current.streak + headsSteps >= zoneStartNow) {
             setClutchPauseUntil(Date.now() + CLUTCH_PAUSE_MS);
         }
 
@@ -481,8 +492,10 @@ const App: React.FC = () => {
             if (isAuto) newState.isPuristRun = false;
 
             if (isHeads) {
-                const newStreak = prev.streak + 1;
-                if (duration > 50 || newStreak % 10 === 0) AudioService.playHeads(newStreak);
+                const steps = isEdge ? Math.max(1, Math.min(EDGE_STREAK, getGoal(prev) - prev.streak)) : 1;
+                const newStreak = prev.streak + steps;
+                if (isEdge) AudioService.playWin();
+                else if (duration > 50 || newStreak % 10 === 0) AudioService.playHeads(newStreak);
                 
                 const comboLevel = prev.upgrades[UpgradeType.COMBO] || 0;
                 const valueLevel = prev.upgrades[UpgradeType.VALUE] || 0;
@@ -491,9 +504,8 @@ const App: React.FC = () => {
                 const goldDiggerLevel = prev.upgrades[UpgradeType.PRESTIGE_GOLD_DIGGER] || 0;
                 const veteranLevel = prev.upgrades[UpgradeType.PRESTIGE_VETERAN] || 0;
 
-                let baseVal = UPGRADES[UpgradeType.VALUE].getEffect(valueLevel);
-                let comboMult = UPGRADES[UpgradeType.COMBO].getEffect(comboLevel);
-                if (newStreak > 1) baseVal *= (1 + (newStreak * (comboMult - 1))); 
+                const baseValue = UPGRADES[UpgradeType.VALUE].getEffect(valueLevel);
+                const comboMult = UPGRADES[UpgradeType.COMBO].getEffect(comboLevel);
 
                 let multiplier = 1;
                 if (edgingLevel > 0) multiplier *= 10;
@@ -503,30 +515,40 @@ const App: React.FC = () => {
                 if (prev.isHardMode) multiplier *= 10;
                 
                 const prestigeMult = 1 + (prev.prestigeLevel * 0.1);
-                const gain = Math.floor(baseVal * multiplier * prestigeMult);
+                // Each Heads in the jump pays at its own streak value
+                let gain = 0;
+                for (let s = prev.streak + 1; s <= newStreak; s++) {
+                    const baseVal = s > 1 ? baseValue * (1 + (s * (comboMult - 1))) : baseValue;
+                    gain += Math.floor(baseVal * multiplier * prestigeMult);
+                }
                 
                 newState.money += gain;
                 newState.streak = newStreak;
                 newState.maxStreak = Math.max(prev.maxStreak, newStreak);
                 newState.stats.highestCash = Math.max(newState.stats.highestCash, newState.money);
-                newState.history = ['H', ...prev.history].slice(0, 10) as GameState['history'];
+                newState.history = [isEdge ? 'E' : 'H', ...prev.history].slice(0, 10) as GameState['history'];
+                const enteredZone = prev.isHardMode && prev.streak < zoneStart && newStreak >= zoneStart;
                 
                 if (prev.isHardMode) {
-                    newState.hardHeat = Math.min(getHeatCap(prev.upgrades), prev.hardHeat + HEAT_PER_HEADS);
+                    newState.hardHeat = Math.min(getHeatCap(prev.upgrades), prev.hardHeat + HEAT_PER_HEADS * steps);
                     newState.injectionFlipsLeft = Math.max(0, prev.injectionFlipsLeft - 1);
-                    if (newStreak % 10 === 0) {
-                        newState.voidFragments += HARD_VF_PER_TEN_STREAK;
-                        newState = addInjectionMeter(newState, INJECTION_METER_PER_TEN_STREAK);
+                    const tensReached = Math.floor(newStreak / 10) - Math.floor(prev.streak / 10);
+                    if (tensReached > 0) {
+                        newState.voidFragments += HARD_VF_PER_TEN_STREAK * tensReached;
+                        newState = addInjectionMeter(newState, INJECTION_METER_PER_TEN_STREAK * tensReached);
                     }
-                    if (newStreak === zoneStart && shouldAutoInject(newState, true)) newState = inject(newState);
+                    if (enteredZone && shouldAutoInject(newState, true)) newState = inject(newState);
                 }
                 
                 const toGo = getGoal(prev) - newStreak;
-                if (prev.isHardMode && newStreak === zoneStart && toGo > 0) {
+                if (prev.isHardMode && toGo <= 0) {
+                    clearCelebration();
+                } else if (isEdge) {
+                    const injected = enteredZone && newState.injectionFlipsLeft === INJECTION_FLIPS;
+                    showHardEvent("EDGE!", 'edge', `+${steps} STREAK${enteredZone ? ' • CLUTCH ZONE' : ''} • ${toGo} TO GO${injected ? ` • INJECTED` : ''}`, newStreak);
+                } else if (enteredZone) {
                     const injected = newState.injectionFlipsLeft === INJECTION_FLIPS;
                     showHardEvent("CLUTCH ZONE", 'clutch', injected ? `${toGo} TO GO • INJECTED +${Math.round(INJECTION_BOOST * 100)}%` : `${toGo} TO GO`, newStreak);
-                } else if (prev.isHardMode && toGo <= 0) {
-                    clearCelebration();
                 } else if (newStreak >= 2 && Date.now() >= celebrationHoldUntilRef.current) {
                     if (celebrationTimeoutRef.current) window.clearTimeout(celebrationTimeoutRef.current);
                     // In the clutch zone the old normal-mode jokes ("WHY?", "NULL") read like a crash; count down instead
@@ -617,6 +639,7 @@ const App: React.FC = () => {
     if ((gameState.streak >= currentGoal || gameState.hardPushBust) && !hasWon) {
         setHasWon(true);
         setClutchPauseUntil(0);
+        setEdgeHoldUntil(0);
         
         saveMetaStats(gameState.stats);
         
@@ -639,11 +662,15 @@ const App: React.FC = () => {
         const timer = window.setTimeout(() => setClutchPauseUntil(0), Math.max(0, clutchPauseUntil - Date.now())) as unknown as number;
         return () => window.clearTimeout(timer);
     }
+    if (isEdgeHold) {
+        const timer = window.setTimeout(() => setEdgeHoldUntil(0), Math.max(0, edgeHoldUntil - Date.now())) as unknown as number;
+        return () => window.clearTimeout(timer);
+    }
     if (gameState.autoFlipEnabled && hasAuto && !isFlipping && !hasWon && gameState.streak < currentGoal && !gameState.hardPushBust && !showMomModal.show && !hardDialogOpen) {
         const timer = window.setTimeout(() => handleFlip(false, true), 100) as unknown as number;
         return () => window.clearTimeout(timer);
     }
-  }, [gameState.autoFlipEnabled, isFlipping, hasWon, gameState.streak, gameState.hardPushBust, currentGoal, gameState.upgrades, handleFlip, showMomModal, isClutchPaused, clutchPauseUntil, hardDialogOpen]);
+  }, [gameState.autoFlipEnabled, isFlipping, hasWon, gameState.streak, gameState.hardPushBust, currentGoal, gameState.upgrades, handleFlip, showMomModal, isClutchPaused, clutchPauseUntil, isEdgeHold, edgeHoldUntil, hardDialogOpen]);
 
   // Auto Buy (keyed on the unlock only, so purchases and flips don't keep restarting the 1s interval)
   useEffect(() => {
@@ -956,6 +983,7 @@ const App: React.FC = () => {
           <li className="flex items-start gap-2"><span className="text-red-500">-</span> Win Streak Requirement: {getHardGoal(gameState.stats.hardModeWins)} (+{HARD_GOAL_STEP} per Hard Win)</li>
           <li className="flex items-start gap-2"><span className="text-green-500">+</span> Heat: each Heads in a row adds +{HEAT_PER_HEADS}% (up to +{getHeatCap(gameState.upgrades)}%). A Tails wipes it.</li>
           <li className="flex items-start gap-2"><span className="text-green-500">+</span> Clutch Zone = from {getClutchZoneStart(getHardGoal(gameState.stats.hardModeWins))} Heads to the goal (always at least the last {CLUTCH_ZONE_MIN}). Wards ($) each save one Tails there, but not during a Push.</li>
+          <li className="flex items-start gap-2"><span className="text-green-500">+</span> Edge landing: on the climb to the Clutch Zone, about {Math.round(UPGRADES[UpgradeType.HARD_EDGE].getEffect(gameState.upgrades[UpgradeType.HARD_EDGE] || 0) * 100)}% of flips land on the edge: +{EDGE_STREAK} streak. Razor's Edge (Abyss) raises it.</li>
           <li className="flex items-start gap-2"><span className="text-green-500">+</span> Void Injection: +{Math.round(INJECTION_BOOST * 100)}% for {INJECTION_FLIPS} flips, past the cap, in the Clutch Zone or a Push. Nothing goes above {Math.round(HARD_CHANCE_CEILING * 100)}%.</li>
           <li className="flex items-start gap-2"><span className="text-green-500">+</span> Charges are earned, not bought: each 10-streak adds {INJECTION_METER_PER_TEN_STREAK} and each hard win adds its VF reward to the meter; {INJECTION_METER_PER_CHARGE} = 1 charge (hold {MAX_INJECTION_CHARGES}).</li>
           <li className="flex items-start gap-2"><span className="text-green-500">+</span> At the goal: Bank the win, or Push {PUSH_STEP} more Heads for double rewards. A bust pays no Resolve.</li>
@@ -1054,6 +1082,13 @@ const App: React.FC = () => {
           </div>
       )}
 
+      {isEdgeHold && !gameState.partyPooperEnabled && (
+        <div className="fixed inset-0 z-[85] pointer-events-none overflow-hidden">
+          <div className="absolute inset-0 bg-gradient-to-br from-amber-500/10 via-transparent to-cyan-500/10 animate-edge-glow" />
+          <div className="absolute inset-0 border-4 border-amber-400/40 animate-edge-border-pulse" />
+        </div>
+      )}
+
       {/* ── Hard mode rules (from the ? in the HUD) ─────────────────────────── */}
       {showHardRules && (
           <div data-no-flip className="fixed inset-0 z-[200] flex items-center justify-center bg-black/90 backdrop-blur-md p-6 animate-fade-in" onClick={() => setShowHardRules(false)}>
@@ -1102,7 +1137,7 @@ const App: React.FC = () => {
             {celebration.level >= 5 && !gameState.partyPooperEnabled && <div className="absolute inset-0 bg-white/20 animate-flash mix-blend-overlay"></div>}
             <div className={`${celebration.level >= 8 ? 'animate-shake' : ''} flex flex-col items-center justify-center px-4`}>
                 <h2 key={celebration.id} className={`font-mono font-bold text-center transition-transform duration-300 max-w-[90vw] break-words leading-tight ${celebration.tone
-                    ? `text-5xl md:text-7xl animate-pop-up ${celebration.tone === 'ward' ? 'text-sky-300 drop-shadow-[0_0_15px_rgba(56,189,248,0.7)]' : 'text-red-500 drop-shadow-[0_0_15px_rgba(239,68,68,0.7)]'}`
+                    ? `text-5xl md:text-7xl animate-pop-up ${celebration.tone === 'ward' ? 'text-sky-300 drop-shadow-[0_0_15px_rgba(56,189,248,0.7)]' : celebration.tone === 'edge' ? 'text-amber-300 drop-shadow-[0_0_20px_rgba(34,211,238,0.8)]' : 'text-red-500 drop-shadow-[0_0_15px_rgba(239,68,68,0.7)]'}`
                     : `drop-shadow-[0_0_15px_rgba(251,191,36,0.6)] ${celebration.level >= 9 ? 'text-7xl md:text-9xl text-amber-500 animate-scale-slam' : celebration.level >= 5 ? 'text-6xl md:text-8xl text-amber-400 animate-pop-up' : 'text-4xl md:text-6xl text-amber-200/80 animate-pop-in-up'}`}`}>
                     {celebration.text}
                 </h2>
@@ -1202,7 +1237,7 @@ const App: React.FC = () => {
                     <div className="relative w-64 h-64 perspective-1000 flex items-center justify-center">
                         <div className="absolute bottom-10 w-32 h-4 bg-black/40 blur-xl rounded-[100%]" style={{ animation: isFlipping ? `shadowScale ${Math.max(1, UPGRADES[UpgradeType.SPEED].getEffect(gameState.upgrades[UpgradeType.SPEED]) - (UPGRADES[UpgradeType.PRESTIGE_FLUX].getEffect(gameState.upgrades[UpgradeType.PRESTIGE_FLUX] || 0) * 250))}ms cubic-bezier(0.5, 0, 0.5, 1) forwards` : 'none' }}></div>
                         <div className="w-48 h-48 relative preserve-3d" style={{ animation: isFlipping ? `tossHeight ${Math.max(1, UPGRADES[UpgradeType.SPEED].getEffect(gameState.upgrades[UpgradeType.SPEED]) - (UPGRADES[UpgradeType.PRESTIGE_FLUX].getEffect(gameState.upgrades[UpgradeType.PRESTIGE_FLUX] || 0) * 250))}ms cubic-bezier(0.5, 0, 0.5, 1) forwards` : 'none' }}>
-                            <div className="w-full h-full relative preserve-3d" style={{ animation: isFlipping ? `tossSpin ${Math.max(1, UPGRADES[UpgradeType.SPEED].getEffect(gameState.upgrades[UpgradeType.SPEED]) - (UPGRADES[UpgradeType.PRESTIGE_FLUX].getEffect(gameState.upgrades[UpgradeType.PRESTIGE_FLUX] || 0) * 250))}ms linear infinite` : 'none', transform: !isFlipping && coinSide ? (coinSide === 'T' ? 'rotateX(180deg)' : 'rotateX(0deg)') : undefined }}>
+                            <div className="w-full h-full relative preserve-3d" style={{ animation: isFlipping ? `tossSpin ${Math.max(1, UPGRADES[UpgradeType.SPEED].getEffect(gameState.upgrades[UpgradeType.SPEED]) - (UPGRADES[UpgradeType.PRESTIGE_FLUX].getEffect(gameState.upgrades[UpgradeType.PRESTIGE_FLUX] || 0) * 250))}ms linear infinite` : 'none', transform: !isFlipping && coinSide && coinSide !== 'E' ? (coinSide === 'T' ? 'rotateX(180deg)' : 'rotateX(0deg)') : undefined, ...(!isFlipping && coinSide === 'E' ? { animation: 'edgeLandSpin 1.2s linear infinite', filter: 'drop-shadow(0 0 18px rgba(34,211,238,0.7))' } : {}) }}>
                                 <div className="absolute inset-0 backface-hidden rounded-full bg-gradient-to-br from-amber-200 via-amber-500 to-amber-700 shadow-inner border-4 border-amber-600 flex items-center justify-center overflow-hidden" style={{ transform: 'rotateX(0deg)' }}><div className="absolute inset-0 opacity-20 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')]"></div><span className="text-8xl font-serif font-bold text-amber-950 mix-blend-overlay drop-shadow-md relative z-10">$</span></div>
                                 <div className="absolute inset-0 backface-hidden rounded-full bg-gradient-to-br from-slate-200 via-slate-400 to-slate-600 shadow-inner border-4 border-slate-500 flex items-center justify-center overflow-hidden" style={{ transform: 'rotateX(180deg)' }}><div className="absolute inset-0 opacity-20 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')]"></div><div className="relative w-full h-full z-10 opacity-70"><div className="absolute top-[35%] left-[28%] w-[14%] h-[14%] bg-slate-900 rounded-full mix-blend-overlay shadow-sm"></div><div className="absolute top-[35%] right-[28%] w-[14%] h-[14%] bg-slate-900 rounded-full mix-blend-overlay shadow-sm"></div><div className="absolute top-[52%] left-1/2 -translate-x-1/2 w-[55%] h-[35%] border-t-[10px] border-slate-900 rounded-[50%] mix-blend-overlay"></div></div></div>
                             </div>
@@ -1214,6 +1249,7 @@ const App: React.FC = () => {
                         <div className="flex flex-col items-center gap-1">
                              <div className="text-[10px] uppercase tracking-widest text-noir-500">Probability</div>
                              <div className="font-mono text-amber-500 text-lg font-bold flex items-center gap-2">{(currentChance * 100).toFixed(0)}%{gameState.injectionFlipsLeft > 0 && <Syringe size={14} className="text-red-500 animate-pulse" />}{gameState.isHardMode && currentChance >= HARD_CHANCE_CEILING && <span className="text-[10px] text-red-400 border border-red-800 px-1" title="The hard mode ceiling">MAX</span>}</div>
+                             {gameState.isHardMode && getEdgeChance(gameState) > 0 && <div className="text-[10px] text-cyan-300/80 font-mono" title="Edge landings only happen before the Clutch Zone">EDGE {UPGRADES[UpgradeType.HARD_EDGE].formatEffect(getEdgeChance(gameState)).replace(' Edge', '')} · +{EDGE_STREAK} STREAK</div>}
                              {!gameState.isHardMode && (gameState.upgrades[UpgradeType.PRESTIGE_FATE] || 0) > 0 && <div className="text-[10px] text-purple-400 font-mono">(+{((gameState.upgrades[UpgradeType.PRESTIGE_FATE] || 0) * 2.5).toFixed(0)}% Base)</div>}
                              {gameState.isHardMode && renderGauntletHud()}
                         </div>
@@ -1226,7 +1262,7 @@ const App: React.FC = () => {
             <div className="flex gap-3 overflow-hidden mask-linear-fade items-center">
                 <span className="text-[10px] uppercase tracking-widest text-noir-700 mr-2">History</span>
                 {gameState.history.map((res, i) => (
-                    <div key={i} className={`w-8 h-8 flex items-center justify-center font-mono font-bold rounded-sm text-xs shadow-lg transition-transform hover:scale-110 cursor-default ${res === 'H' ? 'bg-gradient-to-b from-amber-500 to-amber-700 text-white border border-amber-400' : res === 'W' ? 'bg-gradient-to-b from-sky-700 to-sky-900 text-sky-200 border border-sky-500' : 'bg-gradient-to-b from-noir-700 to-noir-800 text-noir-400 border border-noir-600'}`}>{res === 'H' ? '$' : res === 'W' ? <Shield size={14} /> : <span className="rotate-90 inline-block text-[8px] tracking-tighter font-sans scale-y-150 transform-gpu">:(</span>}</div>
+                    <div key={i} className={`w-8 h-8 flex items-center justify-center font-mono font-bold rounded-sm text-xs shadow-lg transition-transform hover:scale-110 cursor-default ${res === 'H' ? 'bg-gradient-to-b from-amber-500 to-amber-700 text-white border border-amber-400' : res === 'W' ? 'bg-gradient-to-b from-sky-700 to-sky-900 text-sky-200 border border-sky-500' : res === 'E' ? 'bg-gradient-to-b from-cyan-500 to-amber-600 text-white border border-amber-300' : 'bg-gradient-to-b from-noir-700 to-noir-800 text-noir-400 border border-noir-600'}`}>{res === 'H' ? '$' : res === 'W' ? <Shield size={14} /> : res === 'E' ? '⬡' : <span className="rotate-90 inline-block text-[8px] tracking-tighter font-sans scale-y-150 transform-gpu">:(</span>}</div>
                 ))}
             </div>
             
@@ -1287,7 +1323,7 @@ const App: React.FC = () => {
             onSubmitRun={handleManualSubmit}
         />
       </div>
-      <style>{`.rotate-x-180 { transform: rotateX(180deg); } .mask-linear-fade { mask-image: linear-gradient(to right, transparent, black 10%, black 90%, transparent); -webkit-mask-image: linear-gradient(to right, transparent, black 10%, black 90%, transparent); } @keyframes popInUp { 0% { opacity: 0; transform: translateY(20px) scale(0.9); } 100% { opacity: 1; transform: translateY(0) scale(1); } } .animate-pop-in-up { animation: popInUp 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; } @keyframes popUp { 0% { opacity: 0; transform: scale(0.5); } 50% { opacity: 1; transform: scale(1.1); } 100% { opacity: 1; transform: scale(1); } } .animate-pop-up { animation: popUp 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; } @keyframes scaleSlam { 0% { opacity: 0; transform: scale(5); } 60% { opacity: 1; transform: scale(0.9); } 100% { opacity: 1; transform: scale(1); } } .animate-scale-slam { animation: scaleSlam 0.5s cubic-bezier(0.6, -0.28, 0.735, 0.045) forwards; } @keyframes flash { 0%, 100% { opacity: 0; } 10%, 90% { opacity: 1; } } .animate-flash { animation: flash 0.3s ease-out forwards; } @keyframes shake { 0%, 100% { transform: translateX(0); } 10%, 30%, 50%, 70%, 90% { transform: translateX(-5px) rotate(-1deg); } 20%, 40%, 60%, 80% { transform: translateX(5px) rotate(1deg); } } .animate-shake { animation: shake 0.5s ease-in-out; } @keyframes particle { 0% { transform: translate(0, 0) scale(1); opacity: 1; } 100% { transform: translate(var(--tw-translate-x, 100px), var(--tw-translate-y, 100px)) scale(0); opacity: 0; } } .animate-particle { animation: particle 1s ease-out forwards; }`}</style>
+      <style>{`.rotate-x-180 { transform: rotateX(180deg); } .mask-linear-fade { mask-image: linear-gradient(to right, transparent, black 10%, black 90%, transparent); -webkit-mask-image: linear-gradient(to right, transparent, black 10%, black 90%, transparent); } @keyframes popInUp { 0% { opacity: 0; transform: translateY(20px) scale(0.9); } 100% { opacity: 1; transform: translateY(0) scale(1); } } .animate-pop-in-up { animation: popInUp 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; } @keyframes popUp { 0% { opacity: 0; transform: scale(0.5); } 50% { opacity: 1; transform: scale(1.1); } 100% { opacity: 1; transform: scale(1); } } .animate-pop-up { animation: popUp 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; } @keyframes scaleSlam { 0% { opacity: 0; transform: scale(5); } 60% { opacity: 1; transform: scale(0.9); } 100% { opacity: 1; transform: scale(1); } } .animate-scale-slam { animation: scaleSlam 0.5s cubic-bezier(0.6, -0.28, 0.735, 0.045) forwards; } @keyframes flash { 0%, 100% { opacity: 0; } 10%, 90% { opacity: 1; } } .animate-flash { animation: flash 0.3s ease-out forwards; } @keyframes shake { 0%, 100% { transform: translateX(0); } 10%, 30%, 50%, 70%, 90% { transform: translateX(-5px) rotate(-1deg); } 20%, 40%, 60%, 80% { transform: translateX(5px) rotate(1deg); } } .animate-shake { animation: shake 0.5s ease-in-out; } @keyframes particle { 0% { transform: translate(0, 0) scale(1); opacity: 1; } 100% { transform: translate(var(--tw-translate-x, 100px), var(--tw-translate-y, 100px)) scale(0); opacity: 0; } } .animate-particle { animation: particle 1s ease-out forwards; } @keyframes edgeLandSpin { from { transform: rotateY(0deg); } to { transform: rotateY(360deg); } } @keyframes edgeGlow { 0%, 100% { opacity: 0; } 20%, 80% { opacity: 1; } } .animate-edge-glow { animation: edgeGlow 0.9s ease-in-out; } @keyframes edgeBorderPulse { 0% { opacity: 0; transform: scale(0.95); } 30% { opacity: 1; transform: scale(1.02); } 60% { opacity: 0.6; transform: scale(1); } 100% { opacity: 0; } } .animate-edge-border-pulse { animation: edgeBorderPulse 0.9s ease-out forwards; }`}</style>
     </div>
   );
 };

@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { UpgradeType, PlayerStats } from '../types';
 import { UPGRADES, getWardPrice } from '../constants';
 import { getWardCap, INJECTION_METER_PER_CHARGE } from '../hardMode';
-import { Zap, TrendingUp, Clock, Coins, PlayCircle, ShieldCheck, Flame, Ghost, Sparkles, Hourglass, Infinity, Skull, Crown, Heart, Power, Gem, Bot, Package, Syringe, Medal, VolumeX, Shield, ShieldPlus, Gauge, Anchor } from 'lucide-react';
+import { Zap, TrendingUp, Clock, Coins, PlayCircle, ShieldCheck, Flame, Ghost, Sparkles, Hourglass, Infinity, Skull, Crown, Heart, Power, Gem, Bot, Package, Syringe, Medal, VolumeX, Shield, ShieldPlus, Gauge, Anchor, Hexagon } from 'lucide-react';
 
 interface ShopProps {
   money: number;
@@ -56,6 +56,7 @@ const ICONS = {
   [UpgradeType.HARD_MOMENTUM]: Gauge,
   [UpgradeType.HARD_STEADY]: Anchor,
   [UpgradeType.HARD_HEAD_START]: Flame,
+  [UpgradeType.HARD_EDGE]: Hexagon,
 };
 
 const Shop: React.FC<ShopProps> = ({ 

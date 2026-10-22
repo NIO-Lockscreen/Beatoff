@@ -39,6 +39,15 @@ export const HARD_EVENT_HOLD_MS = 1000;     // Clutch/Ward/Injection banners sho
 export const HARD_CONFETTI_BURST = 40;      // Streaks of 20-30 would otherwise bury the HUD in confetti
 export const HARD_CONFETTI_MAX = 120;       // ...and bursts at auto-flip speed would still pile up without a total cap
 
+// Edge landing: on the climb to the clutch zone, a slice of every flip lands the coin on its edge for
+// +EDGE_STREAK (capped at the goal). Kept out of the zone and Pushes: in simulation, edges anywhere at
+// +3 made wins 1.7-8x faster (an edge would turn a lost clutch flip into three Heads); climb-only keeps
+// it at ~1.25x (1%) to ~1.6x (2%, Razor's Edge maxed) and adds clutch zone entries.
+export const EDGE_STREAK = 3;
+export const BASE_EDGE_CHANCE = 0.01;
+export const EDGE_CHANCE_PER_LEVEL = 0.0025;
+export const EDGE_HOLD_MS = 900;            // Auto-flip pauses this long so the edge is seen (own timer)
+
 export const PUSH_STEP = 5;
 export const MAX_PUSHES = 3;
 export const BUST_MULTIPLIER = 0.25;
@@ -75,6 +84,11 @@ export const getHeatCap = (upgrades: Record<UpgradeType, number>): number =>
 // Head Start: what Heat falls back to after a Tails (and at the start of a run)
 export const getHeatFloor = (upgrades: Record<UpgradeType, number>): number =>
     Math.min(getHeatCap(upgrades), upgrades[UpgradeType.HARD_HEAD_START] || 0);
+
+export const getEdgeChance = (state: GoalState & Pick<GameState, 'streak' | 'upgrades'>): number => {
+    if (!state.isHardMode || state.hardPushLevel > 0 || state.streak >= getClutchZoneStart(getGoal(state))) return 0;
+    return BASE_EDGE_CHANCE + (state.upgrades[UpgradeType.HARD_EDGE] || 0) * EDGE_CHANCE_PER_LEVEL;
+};
 
 export const getWardCap = (upgrades: Record<UpgradeType, number>): number =>
     BASE_WARD_CAP + (upgrades[UpgradeType.HARD_BULWARK] || 0);

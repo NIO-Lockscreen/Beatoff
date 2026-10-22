@@ -1,5 +1,5 @@
 import { UpgradeType, UpgradeConfig } from './types';
-import { BASE_HEAT_CAP, HEAT_CAP_PER_MOMENTUM, BASE_WARD_CAP, INJECTION_BOOST, INJECTION_FLIPS, MAX_INJECTION_CHARGES, INJECTION_METER_PER_CHARGE } from './hardMode';
+import { BASE_HEAT_CAP, HEAT_CAP_PER_MOMENTUM, BASE_WARD_CAP, INJECTION_BOOST, INJECTION_FLIPS, MAX_INJECTION_CHARGES, INJECTION_METER_PER_CHARGE, BASE_EDGE_CHANCE, EDGE_CHANCE_PER_LEVEL, EDGE_STREAK } from './hardMode';
 
 const formatLargeNumber = (val: number): string => {
     if (val >= 1e33) return '$' + (val / 1e33).toFixed(1).replace(/\.0$/, '') + 'Dc';
@@ -370,6 +370,18 @@ export const UPGRADES: Record<UpgradeType, UpgradeConfig> = {
     currency: 'resolve',
     getEffect: (level) => level,
     formatEffect: (val) => `${val}% Min Heat`,
+  },
+  [UpgradeType.HARD_EDGE]: {
+    id: UpgradeType.HARD_EDGE,
+    name: "Razor's Edge",
+    description: `Raises the chance the coin lands on its edge (+${EDGE_STREAK} streak) on the climb to the Clutch Zone.`,
+    baseCost: 60,
+    costTiers: [60, 120, 240, 480],
+    maxLevel: 4,
+    isPrestige: true,
+    currency: 'resolve',
+    getEffect: (level) => BASE_EDGE_CHANCE + level * EDGE_CHANCE_PER_LEVEL,
+    formatEffect: (val) => `${(val * 100).toFixed(2).replace(/\.?0+$/, '')}% Edge`,
   },
 };
 

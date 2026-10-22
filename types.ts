@@ -32,6 +32,7 @@ export enum UpgradeType {
   HARD_MOMENTUM = 'HARD_MOMENTUM',   // Abyss: +5% Heat cap
   HARD_STEADY = 'HARD_STEADY',       // Abyss: Ward saves halve Heat instead of resetting it
   HARD_HEAD_START = 'HARD_HEAD_START', // Abyss: Heat never drops below this many points
+  HARD_EDGE = 'HARD_EDGE',           // Abyss: Razor's Edge, raises the edge landing chance
 }
 
 export interface UpgradeConfig {
@@ -73,7 +74,7 @@ export interface GameState {
   maxStreak: number;
   totalFlips: number;
   upgrades: Record<UpgradeType, number>;
-  history: ('H' | 'T' | 'W')[]; // W = Tails absorbed by a Ward
+  history: ('H' | 'T' | 'W' | 'E')[]; // W = Tails absorbed by a Ward, E = edge landing
   
   // Prestige Data
   prestigeLevel: number; // Multiplier for global income
