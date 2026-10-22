@@ -25,6 +25,7 @@ interface ShopProps {
   resolve: number;
   wardsHeld: number;
   isPushing: boolean;
+  injectionPrice: number;
 }
 
 const ICONS = {
@@ -77,7 +78,8 @@ const Shop: React.FC<ShopProps> = ({
   playerStats,
   resolve,
   wardsHeld,
-  isPushing
+  isPushing,
+  injectionPrice
 }) => {
   
   const hasLimitless = (upgrades[UpgradeType.PRESTIGE_LIMITLESS] || 0) > 0;
@@ -239,6 +241,8 @@ const Shop: React.FC<ShopProps> = ({
         cost = upgrade.costTiers[currentLevel] || upgrade.costTiers[upgrade.costTiers.length - 1];
     } else if (isWard) {
         cost = isMaxed ? 0 : (getWardPrice(upgrades, prestigeLevel) ?? 0);
+    } else if (upgrade.id === UpgradeType.HARD_MODE_BUFF) {
+        cost = isMaxed ? 0 : injectionPrice;
     } else if (isPrestige && !isResolve && cost > 50) {
         cost = 50;
     }

@@ -28,6 +28,9 @@ export const BASE_WARD_CAP = 1;
 export const INJECTION_BOOST = 0.20;
 export const INJECTION_FLIPS = 10;
 export const MAX_INJECTION_CHARGES = 3;
+// Price of each Void Injection charge bought this run (the last entry repeats); resets on ascend
+export const INJECTION_PRICES = [5];
+export const HARD_VF_PER_TEN_STREAK = 5;   // VF paid each time a hard mode streak hits a multiple of 10
 export const CLUTCH_PAUSE_MS = 3000;
 export const AUTO_BANK_DELAY_MS = 5000;
 export const HARD_EVENT_HOLD_MS = 1000;     // Clutch/Ward/Injection banners show this long and can't be overwritten by streak pops
@@ -108,6 +111,9 @@ export const inject = <T extends InjectState>(state: T): T => {
 // Auto-inject only holds back when the ceiling is already reached (charges are plentiful)
 export const shouldAutoInject = (state: InjectState & Pick<GameState, 'autoInjectEnabled'>): boolean =>
     state.autoInjectEnabled && canInject(state) && getChance(state) < HARD_CHANCE_CEILING;
+
+export const getInjectionPrice = (boughtThisRun: number): number =>
+    INJECTION_PRICES[Math.min(boughtThisRun, INJECTION_PRICES.length - 1)];
 
 export const getPushMultiplier = (pushLevel: number, bust: boolean): number =>
     bust ? BUST_MULTIPLIER : Math.pow(2, pushLevel);

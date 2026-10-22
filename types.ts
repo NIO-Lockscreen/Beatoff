@@ -92,6 +92,7 @@ export interface GameState {
   hardPushBust: boolean; // A push ended on an unabsorbed Tails
   autoInjectEnabled: boolean; // Fire Void Injection automatically at clutch moments
   autoBankEnabled: boolean; // Bank hard mode wins automatically after a short delay
+  injectionsBoughtThisRun: number; // Void Injection charges bought this run (sets the next charge's price)
   
   // UX
   seenUpgrades: UpgradeType[]; // List of upgrades user has scrolled to/seen

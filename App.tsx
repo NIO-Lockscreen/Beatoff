@@ -3,9 +3,9 @@ import { GameState, UpgradeType, FRAGMENTS_PER_WIN, PlayerStats, GlobalLeaderboa
 import { UPGRADES, getWardPrice } from './constants';
 import {
   getGoal, getHardGoal, getChance, getBaseChance, getClutchZoneStart, isInClutchZone, getHeatCap, getWardCap, getHardWinRewards, getPushMultiplier,
-  getPushSuccessChance, inject, canInject, canWardAbsorb, shouldAutoInject, getHeatFloor, getClutchZoneSize, HEAT_PER_HEADS, HARD_BASE_CAP, HARD_CHANCE_CEILING,
+  getPushSuccessChance, inject, canInject, canWardAbsorb, shouldAutoInject, getHeatFloor, getClutchZoneSize, getInjectionPrice, HEAT_PER_HEADS, HARD_BASE_CAP, HARD_CHANCE_CEILING,
   INJECTION_BOOST, INJECTION_FLIPS, MAX_PUSHES, PUSH_STEP, CLUTCH_PAUSE_MS, HARD_GOAL_STEP,
-  HARD_EVENT_HOLD_MS, HARD_CONFETTI_BURST, HARD_CONFETTI_MAX, AUTO_BANK_DELAY_MS,
+  HARD_EVENT_HOLD_MS, HARD_CONFETTI_BURST, HARD_CONFETTI_MAX, AUTO_BANK_DELAY_MS, HARD_VF_PER_TEN_STREAK,
 } from './hardMode';
 import Shop from './components/Shop';
 import ProbabilityModal from './components/ProbabilityModal';
@@ -69,6 +69,7 @@ const INITIAL_STATE: GameState = {
   hardPushBust: false,
   autoInjectEnabled: true,
   autoBankEnabled: false,
+  injectionsBoughtThisRun: 0,
   seenUpgrades: [UpgradeType.CHANCE, UpgradeType.SPEED, UpgradeType.COMBO, UpgradeType.VALUE], 
   playerName: null,
   stats: INITIAL_STATS,
@@ -181,6 +182,7 @@ const App: React.FC = () => {
         if (typeof loaded.hardPushBust === 'undefined') loaded.hardPushBust = false;
         if (typeof loaded.autoInjectEnabled === 'undefined') loaded.autoInjectEnabled = true;
         if (typeof loaded.autoBankEnabled === 'undefined') loaded.autoBankEnabled = false;
+        if (typeof loaded.injectionsBoughtThisRun === 'undefined') loaded.injectionsBoughtThisRun = 0;
         
         if (!loaded.seenUpgrades) {
             loaded.seenUpgrades = [UpgradeType.CHANCE, UpgradeType.SPEED, UpgradeType.COMBO, UpgradeType.VALUE];
@@ -381,7 +383,8 @@ const App: React.FC = () => {
   const restartRun = (nextHardMode: boolean) => {
       const nextTitles = { ...gameState.unlockedTitles };
       if (nextHardMode) nextTitles['HARD_MAN'] = Math.max(1, gameState.stats.hardModeWins);
-      setGameState(buildNewRun(gameState, { isHardMode: nextHardMode, unlockedTitles: nextTitles }));
+      // The Injection price ladder only resets on a won ascend, so retreat/re-enter can't reset it for free
+      setGameState(buildNewRun(gameState, { isHardMode: nextHardMode, unlockedTitles: nextTitles, injectionsBoughtThisRun: gameState.injectionsBoughtThisRun }));
       resetRunUi();
   };
 
@@ -498,7 +501,7 @@ const App: React.FC = () => {
                 if (prev.isHardMode) {
                     newState.hardHeat = Math.min(getHeatCap(prev.upgrades), prev.hardHeat + HEAT_PER_HEADS);
                     newState.injectionFlipsLeft = Math.max(0, prev.injectionFlipsLeft - 1);
-                    if (newStreak % 10 === 0) newState.voidFragments += 5;
+                    if (newStreak % 10 === 0) newState.voidFragments += HARD_VF_PER_TEN_STREAK;
                     if (newStreak === zoneStart && shouldAutoInject(newState)) newState = inject(newState);
                 }
                 
@@ -707,9 +710,9 @@ const App: React.FC = () => {
           // Void Injection charges and Abyss upgrades have hard limits (no Limitless tiers).
           // Their prices are read from the current state so two quick clicks can't both pay the old price.
           if (id === UpgradeType.HARD_MODE_BUFF) {
-              const price = UPGRADES[id].costTiers[level];
-              if (price === undefined || prev.voidFragments < price) return prev;
-              return { ...prev, voidFragments: prev.voidFragments - price, upgrades: { ...prev.upgrades, [id]: level + 1 } };
+              const price = getInjectionPrice(prev.injectionsBoughtThisRun);
+              if (level >= UPGRADES[id].maxLevel || prev.voidFragments < price) return prev;
+              return { ...prev, voidFragments: prev.voidFragments - price, injectionsBoughtThisRun: prev.injectionsBoughtThisRun + 1, upgrades: { ...prev.upgrades, [id]: level + 1 } };
           }
 
           if (UPGRADES[id].currency === 'resolve') {
@@ -883,7 +886,7 @@ const App: React.FC = () => {
       return (map[key] || key) + suffix;
   };
 
-  const injectionCost = UPGRADES[UpgradeType.HARD_MODE_BUFF].costTiers[0];
+  const injectionCost = getInjectionPrice(gameState.injectionsBoughtThisRun);
   const buyInjectionCharge = () => handleBuy(UpgradeType.HARD_MODE_BUFF, injectionCost, true);
 
   const renderGauntletHud = () => {
@@ -943,7 +946,7 @@ const App: React.FC = () => {
           <li className="flex items-start gap-2"><span className="text-red-500">-</span> Win Streak Requirement: {getHardGoal(gameState.stats.hardModeWins)} (+{HARD_GOAL_STEP} per Hard Win)</li>
           <li className="flex items-start gap-2"><span className="text-green-500">+</span> Heat: each Heads in a row adds +{HEAT_PER_HEADS}% (up to +{getHeatCap(gameState.upgrades)}%). A Tails wipes it.</li>
           <li className="flex items-start gap-2"><span className="text-green-500">+</span> Clutch Zone = the last {getClutchZoneSize(getHardGoal(gameState.stats.hardModeWins))} Heads (it grows with the goal). Wards ($) each save one Tails there, but not during a Push.</li>
-          <li className="flex items-start gap-2"><span className="text-green-500">+</span> Void Injection ({injectionCost} VF a charge): +{Math.round(INJECTION_BOOST * 100)}% for {INJECTION_FLIPS} flips, past the cap. Usable in the Clutch Zone and during a Push. Nothing goes above {Math.round(HARD_CHANCE_CEILING * 100)}%.</li>
+          <li className="flex items-start gap-2"><span className="text-green-500">+</span> Void Injection ({injectionCost} VF for the next charge): +{Math.round(INJECTION_BOOST * 100)}% for {INJECTION_FLIPS} flips, past the cap. Usable in the Clutch Zone and during a Push. Nothing goes above {Math.round(HARD_CHANCE_CEILING * 100)}%.</li>
           <li className="flex items-start gap-2"><span className="text-green-500">+</span> At the goal: Bank the win, or Push {PUSH_STEP} more Heads for double rewards. A bust pays no Resolve.</li>
           <li className="flex items-start gap-2"><span className="text-green-500">+</span> Every 10-streak pays VF. Hard wins pay Resolve, which buys permanent upgrades in The Abyss.</li>
           <li className="flex items-start gap-2"><span className="text-green-500">+</span> Permanent 10x Cash Multiplier</li>
@@ -1259,6 +1262,7 @@ const App: React.FC = () => {
         resolve={gameState.resolve}
         wardsHeld={gameState.wardsHeld}
         isPushing={gameState.hardPushLevel > 0}
+        injectionPrice={injectionCost}
       />
 
       <div className="relative z-[100]">
