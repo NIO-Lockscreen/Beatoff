@@ -24,6 +24,7 @@ interface ShopProps {
   playerStats: PlayerStats;
   resolve: number;
   wardsHeld: number;
+  isPushing: boolean;
 }
 
 const ICONS = {
@@ -75,7 +76,8 @@ const Shop: React.FC<ShopProps> = ({
   isHardMode,
   playerStats,
   resolve,
-  wardsHeld
+  wardsHeld,
+  isPushing
 }) => {
   
   const hasLimitless = (upgrades[UpgradeType.PRESTIGE_LIMITLESS] || 0) > 0;
@@ -230,6 +232,7 @@ const Shop: React.FC<ShopProps> = ({
     const isResolve = upgrade.currency === 'resolve';
     const isWard = upgrade.id === UpgradeType.HARD_WARD;
     const wardsFull = isWard && wardsHeld >= wardCap;
+    const wardsBlocked = isWard && isPushing; // Wards don't work during a Push
     
     // Exception for Gold Digger & Mom (Abyss prices are never clamped)
     if (upgrade.id === UpgradeType.PRESTIGE_GOLD_DIGGER) {
@@ -245,7 +248,7 @@ const Shop: React.FC<ShopProps> = ({
     const isGoldDigger = upgrade.id === UpgradeType.PRESTIGE_GOLD_DIGGER;
     const effectiveCurrency = isGoldDigger ? money : currency;
 
-    const canAfford = !isMaxed && !wardsFull && effectiveCurrency >= cost;
+    const canAfford = !isMaxed && !wardsFull && !wardsBlocked && effectiveCurrency >= cost;
     
     const Icon = ICONS[upgrade.id] || Zap;
     
@@ -423,6 +426,8 @@ const Shop: React.FC<ShopProps> = ({
             >
             {isMaxed
                 ? (upgrade.id === UpgradeType.HARD_MODE_BUFF ? 'FULL' : 'MAXED')
+                : wardsBlocked
+                    ? 'NOT DURING PUSH'
                 : wardsFull
                     ? 'FULL'
                     : isResolve

@@ -7,6 +7,8 @@ interface ConfettiSystemProps {
   momPurchases: number;
   partyPooperEnabled?: boolean;
   maxBurst?: number; // Particles per Heads at most (hard mode streaks run far past 10)
+  maxParticles?: number; // Cap on particles alive at once (bursts at auto-flip speed otherwise pile up)
+  alwaysClearOnReset?: boolean; // Clear on a Tails even while a title's ambient effect is running
 }
 
 interface Particle {
@@ -44,7 +46,7 @@ const MOMMY_COLORS = [
   '#fce7f3', // pink-100
 ];
 
-const ConfettiSystem: React.FC<ConfettiSystemProps> = ({ streak, isRichMode = false, activeTitle, momPurchases, partyPooperEnabled = false, maxBurst = 200 }) => {
+const ConfettiSystem: React.FC<ConfettiSystemProps> = ({ streak, isRichMode = false, activeTitle, momPurchases, partyPooperEnabled = false, maxBurst = 200, maxParticles = Infinity, alwaysClearOnReset = false }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const particles = useRef<Particle[]>([]);
   const animationId = useRef<number | null>(null);
@@ -175,14 +177,14 @@ const ConfettiSystem: React.FC<ConfettiSystemProps> = ({ streak, isRichMode = fa
   useEffect(() => {
     // 1. Handle Reset (Failed flip)
     if (streak === 0) {
-      if (!isRichMode && !activeTitle) particles.current = [];
+      if (alwaysClearOnReset || (!isRichMode && !activeTitle)) particles.current = [];
     } 
     // 2. Handle Streak Increase (Success)
     else if (streak > prevStreak.current) {
       if (!partyPooperEnabled) {
       const canvas = canvasRef.current;
       if (canvas) {
-         const count = Math.min(20 + (streak * 10), maxBurst); 
+         const count = Math.min(20 + (streak * 10), maxBurst, Math.max(0, maxParticles - particles.current.length)); 
          
          for (let i = 0; i < count; i++) {
             
@@ -217,7 +219,7 @@ const ConfettiSystem: React.FC<ConfettiSystemProps> = ({ streak, isRichMode = fa
       }
     }
     prevStreak.current = streak;
-  }, [streak, isRichMode, activeTitle, momPurchases, maxBurst]);
+  }, [streak, isRichMode, activeTitle, momPurchases, maxBurst, maxParticles, alwaysClearOnReset]);
 
   return (
     <canvas 

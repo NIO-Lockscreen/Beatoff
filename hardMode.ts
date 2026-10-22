@@ -30,8 +30,9 @@ export const INJECTION_FLIPS = 10;
 export const MAX_INJECTION_CHARGES = 3;
 export const CLUTCH_PAUSE_MS = 3000;
 export const AUTO_BANK_DELAY_MS = 5000;
-export const HARD_EVENT_HOLD_MS = 1200;     // Clutch/Ward/Injection banners can't be overwritten by streak pops this soon
+export const HARD_EVENT_HOLD_MS = 1000;     // Clutch/Ward/Injection banners show this long and can't be overwritten by streak pops
 export const HARD_CONFETTI_BURST = 40;      // Streaks of 20-30 would otherwise bury the HUD in confetti
+export const HARD_CONFETTI_MAX = 120;       // ...and bursts at auto-flip speed would still pile up without a total cap
 
 export const PUSH_STEP = 5;
 export const MAX_PUSHES = 3;
